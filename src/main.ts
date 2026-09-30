@@ -221,3 +221,14 @@ if (!still) document.querySelectorAll<HTMLElement>('.tilt').forEach((el) => {
 
 renderUI();
 resize();
+
+/* ---------- Loading Overlay ---------- */
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const loader = $('#loadingOverlay');
+    if (loader) {
+      loader.classList.add('hidden');
+      setTimeout(() => loader.remove(), 600); // clean up DOM
+    }
+  }, 800);
+});
