@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stock Logger · Warehouse</title>
+  <meta name="description" content="Warehouse Stock Logger — log, track and visualise your inventory in real time with a 3-D rack view." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="header-brand">
+        <a href="/" class="back-link" title="Back to home">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </a>
+        <h1>Stock Logger</h1>
+      </div>
+      <div class="stats" id="stats"></div>
+    </header>
+
+    <main>
+      <section class="panel scene-wrap">
+        <div id="scene"></div>
+        <div id="tip" class="tip"></div>
+        <p class="hint">Drag to orbit, scroll to zoom, click a box to select it.</p>
+      </section>
+
+      <section class="panel tilt">
+        <h2>Log a movement</h2>
+        <form id="form" autocomplete="off">
+          <div class="toggle" role="group" aria-label="Movement type">
+            <button type="button" class="in active" data-type="IN">Stock in</button>
+            <button type="button" class="out" data-type="OUT">Stock out</button>
+          </div>
+          <label>SKU
+            <input id="sku" list="skus" placeholder="e.g. BLT-001" required />
+            <datalist id="skus"></datalist>
+          </label>
+          <label id="nameRow">Item name (new SKUs)
+            <input id="name" placeholder="e.g. Hex bolts M8" />
+          </label>
+          <label>Quantity
+            <input id="qty" type="number" min="1" step="1" value="1" required />
+          </label>
+          <label>Note
+            <input id="note" placeholder="PO number, order ID, reason…" />
+          </label>
+          <button class="submit" type="submit">Save stock in</button>
+          <p id="msg" class="msg" role="status"></p>
+        </form>
+      </section>
+
+      <section class="panel tilt">
+        <h2>Inventory</h2>
+        <div class="scroll"><table id="inv"></table></div>
+      </section>
+
+      <section class="panel tilt">
+        <h2>Movement log</h2>
+        <div class="scroll"><table id="log"></table></div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
