@@ -244,3 +244,83 @@ window.addEventListener('load', () => {
     }
   }, 800);
 });
+
+/* ---------- Logout ---------- */
+$('#logoutBtn')?.addEventListener('click', () => {
+  localStorage.removeItem('wh-session');
+  window.location.replace('/');
+});
+
+/* ---------- Footer Nav Submenus ---------- */
+document.querySelectorAll<HTMLButtonElement>('.nav-item.has-submenu').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent document click from immediately closing it
+    
+    const group = btn.closest('.nav-group');
+    const submenu = group?.querySelector('.nav-submenu');
+    
+    // Close other submenus
+    document.querySelectorAll('.nav-submenu.open').forEach(openSub => {
+      if (openSub !== submenu) {
+        openSub.classList.remove('open');
+        openSub.closest('.nav-group')?.classList.remove('open');
+      }
+    });
+
+    if (group && submenu) {
+      group.classList.toggle('open');
+      submenu.classList.toggle('open');
+    }
+  });
+});
+
+// Close submenus when clicking outside
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.closest('.nav-group')) {
+    document.querySelectorAll('.nav-submenu.open').forEach(openSub => {
+      openSub.classList.remove('open');
+      openSub.closest('.nav-group')?.classList.remove('open');
+    });
+  }
+});
+
+/* ---------- Navigation & Views ---------- */
+const dashboardView = $('#dashboardView');
+const settingsView = $('#settingsView');
+const navDashboard = $('#navDashboard');
+const navSettings = $('#navSettings');
+
+function switchView(view: 'dashboard' | 'settings') {
+  if (!dashboardView || !settingsView || !navDashboard || !navSettings) return;
+  
+  if (view === 'settings') {
+    dashboardView.style.display = 'none';
+    settingsView.style.display = 'block';
+    navDashboard.classList.remove('active');
+    navSettings.classList.add('active');
+    
+    // Populate username
+    const session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
+    const settingUser = $('#settingUser');
+    if (settingUser && session?.username) {
+      settingUser.textContent = session.username;
+    }
+  } else {
+    settingsView.style.display = 'none';
+    dashboardView.style.display = 'block';
+    navSettings.classList.remove('active');
+    navDashboard.classList.add('active');
+    resize(); // Trigger resize for 3D canvas when returning to dashboard
+  }
+}
+
+navDashboard?.addEventListener('click', (e) => {
+  e.preventDefault();
+  switchView('dashboard');
+});
+
+navSettings?.addEventListener('click', (e) => {
+  e.preventDefault();
+  switchView('settings');
+});

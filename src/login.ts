@@ -9,10 +9,46 @@ function showLoader(text: string) {
   }
 }
 
-/* ── Cashier (employee) form — no credential check ── */
+function showError(msgId: string, text: string) {
+  const msgEl = document.getElementById(msgId);
+  if (msgEl) {
+    msgEl.textContent = text;
+    msgEl.classList.add('error');
+    
+    // Add a little shake effect (defined in CSS if needed, or just visual)
+    msgEl.style.animation = 'none';
+    msgEl.offsetHeight; // trigger reflow
+    msgEl.style.animation = 'shake 0.4s ease';
+  }
+}
+
+function clearError(msgId: string) {
+  const msgEl = document.getElementById(msgId);
+  if (msgEl) {
+    msgEl.textContent = '';
+    msgEl.classList.remove('error');
+  }
+}
+
+/* ── Cashier (employee) form ── */
 document.getElementById('employeeForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  const username = (document.getElementById('empUsername') as HTMLInputElement)?.value.trim() || 'cashier';
+  const usernameInput = document.getElementById('empUsername') as HTMLInputElement;
+  const passwordInput = document.getElementById('empPassword') as HTMLInputElement;
+  const username = usernameInput?.value.trim();
+  const password = passwordInput?.value.trim();
+
+  if (!username || !password) {
+    showError('empMsg', 'Please enter both username and password.');
+    return;
+  }
+  
+  if (username !== 'cashier' || password !== 'password123') {
+    showError('empMsg', 'Invalid username or password.');
+    return;
+  }
+
+  clearError('empMsg');
   localStorage.setItem('wh-session', JSON.stringify({ username, role: 'employee' }));
   
   showLoader('Authenticating as Cashier...');
@@ -21,10 +57,25 @@ document.getElementById('employeeForm')?.addEventListener('submit', (e) => {
   }, 600);
 });
 
-/* ── Admin form — no credential check ── */
+/* ── Admin form ── */
 document.getElementById('adminForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  const username = (document.getElementById('adminUsername') as HTMLInputElement)?.value.trim() || 'admin';
+  const usernameInput = document.getElementById('adminUsername') as HTMLInputElement;
+  const passwordInput = document.getElementById('adminPassword') as HTMLInputElement;
+  const username = usernameInput?.value.trim();
+  const password = passwordInput?.value.trim();
+
+  if (!username || !password) {
+    showError('adminMsg', 'Please enter both username and password.');
+    return;
+  }
+
+  if (username !== 'admin' || password !== 'admin123') {
+    showError('adminMsg', 'Invalid username or password.');
+    return;
+  }
+
+  clearError('adminMsg');
   localStorage.setItem('wh-session', JSON.stringify({ username, role: 'admin' }));
   
   showLoader('Authenticating as Admin...');
