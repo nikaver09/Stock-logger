@@ -2,6 +2,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import './style.css';
 
+/* ---------- auth guard ---------- */
+(function checkAuth() {
+  try {
+    const session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
+    if (!session?.username) {
+      window.location.replace('/');
+    }
+  } catch {
+    window.location.replace('/');
+  }
+})();
+
 type Item = { sku: string; name: string; qty: number; slot: number };
 type Log = { id: number; time: string; sku: string; type: 'IN' | 'OUT'; qty: number; note: string };
 type Move = 'IN' | 'OUT';
