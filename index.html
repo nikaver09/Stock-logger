@@ -60,6 +60,9 @@
           <button type="submit" class="btn-submit" id="empBtn">
             <span id="empBtnText">Log in</span>
           </button>
+          <div class="forgot-row">
+            <button type="button" class="forgot-link" id="forgotCashier">Forgot password?</button>
+          </div>
         </form>
       </div>
 
@@ -85,11 +88,51 @@
           <button type="submit" class="btn-submit" id="adminBtn">
             <span id="adminBtnText">Log in</span>
           </button>
+          <div class="forgot-row">
+            <button type="button" class="forgot-link" id="forgotAdmin">Forgot password?</button>
+          </div>
         </form>
       </div>
 
     </div><!-- /login-card -->
   </div><!-- /page-wrap -->
+
+  <!-- ── Reset Password Modal ── -->
+  <div id="resetModal" class="reset-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="resetModalTitle">
+    <div class="reset-modal">
+      <button class="reset-modal-close" id="closeResetModal" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="reset-modal-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <h2 id="resetModalTitle" class="reset-modal-title">Reset Password</h2>
+      <p class="reset-modal-sub">Your password will be reset to the <strong>default</strong>. Enter your username to confirm.</p>
+
+      <!-- Step 1: enter username -->
+      <div id="resetStep1">
+        <div class="reset-field">
+          <label for="resetUsername">Username</label>
+          <input type="text" id="resetUsername" placeholder="Enter your username" autocomplete="off" />
+        </div>
+        <p id="resetMsg" class="reset-msg" role="status"></p>
+        <div class="reset-actions">
+          <button type="button" id="cancelResetModal" class="btn-reset-cancel">Cancel</button>
+          <button type="button" id="confirmReset" class="btn-reset-confirm">Reset Password</button>
+        </div>
+      </div>
+
+      <!-- Step 2: success -->
+      <div id="resetStep2" style="display:none;">
+        <div class="reset-success-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <p class="reset-success-text">Password reset successfully!</p>
+        <p id="resetSuccessInfo" class="reset-success-sub"></p>
+        <button type="button" id="closeResetSuccess" class="btn-reset-confirm" style="width:100%; margin-top:20px;">Got it</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     /* ── Tab switching ── */

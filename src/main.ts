@@ -300,17 +300,51 @@ function switchView(view: 'dashboard' | 'settings') {
     navDashboard.classList.remove('active');
     navSettings.classList.add('active');
     
-    // Populate username
+    // Populate username + role
     const session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
-    const settingUser = $('#settingUser');
-    if (settingUser && session?.username) {
-      settingUser.textContent = session.username;
+    const settingUser = $<HTMLElement>('#settingUser');
+    const settingRole = $<HTMLElement>('#settingRole');
+    if (settingUser && session?.username) settingUser.textContent = session.username;
+    if (settingRole && session?.role)     settingRole.textContent = session.role;
+
+    // Populate password (masked by default)
+    const creds = loadCreds();
+    const role  = session?.role as string;
+    const currentPassword = creds[role]?.password ?? '';
+    const passDisplay = $<HTMLElement>('#settingPassDisplay');
+    let passRevealed = false;
+    if (passDisplay) passDisplay.textContent = '•'.repeat(currentPassword.length || 8);
+
+    // Wire reveal toggle (remove old listener by cloning the button)
+    const oldBtn = $<HTMLButtonElement>('#togglePassReveal');
+    if (oldBtn) {
+      const newBtn = oldBtn.cloneNode(true) as HTMLButtonElement;
+      oldBtn.replaceWith(newBtn);
+      newBtn.addEventListener('click', () => {
+        passRevealed = !passRevealed;
+        if (passDisplay) {
+          passDisplay.textContent = passRevealed
+            ? currentPassword
+            : '•'.repeat(currentPassword.length || 8);
+        }
+        // Swap eye icon
+        const eyeSvg = newBtn.querySelector('svg');
+        if (eyeSvg) {
+          eyeSvg.innerHTML = passRevealed
+            ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>'
+            : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+        }
+        newBtn.style.color = passRevealed ? 'var(--accent)' : 'var(--muted)';
+      });
     }
   } else {
     settingsView.style.display = 'none';
     dashboardView.style.display = 'block';
     navSettings.classList.remove('active');
     navDashboard.classList.add('active');
+    // Re-mask password when leaving settings
+    const passDisplay = $<HTMLElement>('#settingPassDisplay');
+    if (passDisplay) passDisplay.textContent = '••••••••';
     resize(); // Trigger resize for 3D canvas when returning to dashboard
   }
 }
@@ -323,4 +357,130 @@ navDashboard?.addEventListener('click', (e) => {
 navSettings?.addEventListener('click', (e) => {
   e.preventDefault();
   switchView('settings');
+});
+
+/* ---------- Credentials store ----------
+   Stored as: { admin: { username, password }, employee: { username, password } }
+   Falls back to hardcoded defaults if not yet customised.
+*/
+const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
+  admin:    { username: 'admin',   password: 'admin123'    },
+  employee: { username: 'cashier', password: 'password123' },
+};
+
+function loadCreds(): Record<string, { username: string; password: string }> {
+  try {
+    return JSON.parse(localStorage.getItem('wh-credentials') ?? '') as typeof DEFAULT_CREDS;
+  } catch {
+    return JSON.parse(JSON.stringify(DEFAULT_CREDS)); // deep clone defaults
+  }
+}
+function saveCreds(creds: Record<string, { username: string; password: string }>) {
+  localStorage.setItem('wh-credentials', JSON.stringify(creds));
+}
+function getSession(): { username: string; role: string } | null {
+  try { return JSON.parse(localStorage.getItem('wh-session') ?? 'null'); } catch { return null; }
+}
+
+/* ---------- Settings Modals ---------- */
+function openModal(id: string) {
+  $<HTMLDivElement>(`#${id}`)?.classList.add('open');
+}
+function closeModal(id: string) {
+  $<HTMLDivElement>(`#${id}`)?.classList.remove('open');
+}
+function setModalMsg(msgId: string, text: string, isOk = false) {
+  const el = $<HTMLParagraphElement>(`#${msgId}`);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'smodal-msg ' + (isOk ? 'ok' : 'err');
+}
+
+// Open/close wiring
+$('#openChangeUsername')?.addEventListener('click', () => {
+  ($<HTMLFormElement>('#usernameForm'))?.reset();
+  setModalMsg('unMsg', '');
+  openModal('usernameModal');
+  setTimeout(() => $<HTMLInputElement>('#unCurrentPass')?.focus(), 100);
+});
+$('#closeUsernameModal')?.addEventListener('click',  () => closeModal('usernameModal'));
+$('#cancelUsernameModal')?.addEventListener('click', () => closeModal('usernameModal'));
+
+$('#openChangePassword')?.addEventListener('click', () => {
+  ($<HTMLFormElement>('#passwordForm'))?.reset();
+  setModalMsg('pwMsg', '');
+  openModal('passwordModal');
+  setTimeout(() => $<HTMLInputElement>('#pwCurrentPass')?.focus(), 100);
+});
+$('#closePasswordModal')?.addEventListener('click',  () => closeModal('passwordModal'));
+$('#cancelPasswordModal')?.addEventListener('click', () => closeModal('passwordModal'));
+
+// Close on backdrop click
+['usernameModal', 'passwordModal'].forEach(id => {
+  $<HTMLDivElement>(`#${id}`)?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).id === id) closeModal(id);
+  });
+});
+
+/* ── Change Username ── */
+$<HTMLFormElement>('#usernameForm')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const session = getSession();
+  if (!session) return;
+
+  const creds  = loadCreds();
+  const role   = session.role;
+  const stored = creds[role];
+  const enteredPass = ($<HTMLInputElement>('#unCurrentPass')).value;
+  const newName     = ($<HTMLInputElement>('#unNewName')).value.trim();
+
+  if (!stored || enteredPass !== stored.password) {
+    return setModalMsg('unMsg', 'Incorrect current password.');
+  }
+  if (!newName || newName.length < 3) {
+    return setModalMsg('unMsg', 'Username must be at least 3 characters.');
+  }
+
+  // Update credentials & session
+  stored.username = newName;
+  saveCreds(creds);
+  localStorage.setItem('wh-session', JSON.stringify({ ...session, username: newName }));
+
+  setModalMsg('unMsg', 'Username updated successfully!', true);
+  setTimeout(() => {
+    closeModal('usernameModal');
+    // Refresh settings display
+    const settingUser = $<HTMLElement>('#settingUser');
+    if (settingUser) settingUser.textContent = newName;
+  }, 1200);
+});
+
+/* ── Change Password ── */
+$<HTMLFormElement>('#passwordForm')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const session = getSession();
+  if (!session) return;
+
+  const creds      = loadCreds();
+  const role       = session.role;
+  const stored     = creds[role];
+  const currentPass = ($<HTMLInputElement>('#pwCurrentPass')).value;
+  const newPass     = ($<HTMLInputElement>('#pwNewPass')).value;
+  const confirmPass = ($<HTMLInputElement>('#pwConfirmPass')).value;
+
+  if (!stored || currentPass !== stored.password) {
+    return setModalMsg('pwMsg', 'Incorrect current password.');
+  }
+  if (newPass.length < 6) {
+    return setModalMsg('pwMsg', 'New password must be at least 6 characters.');
+  }
+  if (newPass !== confirmPass) {
+    return setModalMsg('pwMsg', 'Passwords do not match.');
+  }
+
+  stored.password = newPass;
+  saveCreds(creds);
+
+  setModalMsg('pwMsg', 'Password changed successfully!', true);
+  setTimeout(() => closeModal('passwordModal'), 1200);
 });

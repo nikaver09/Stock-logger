@@ -917,9 +917,12 @@ ul { list-style: none; }
 /* ───────────────────────────────────────────
    SCROLLBAR
 ─────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--in); }
+::-webkit-scrollbar-corner { background: var(--bg); border-radius: 6px; }
+* { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
 
 /* ───────────────────────────────────────────
    ENTRANCE ANIMATIONS
