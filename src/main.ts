@@ -359,10 +359,6 @@ navSettings?.addEventListener('click', (e) => {
   switchView('settings');
 });
 
-/* ---------- Credentials store ----------
-   Stored as: { admin: { username, password }, employee: { username, password } }
-   Falls back to hardcoded defaults if not yet customised.
-*/
 const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
   admin:    { username: 'admin',   password: 'admin123'    },
   employee: { username: 'cashier', password: 'password123' },

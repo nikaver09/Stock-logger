@@ -192,3 +192,110 @@ document.getElementById('confirmReset')?.addEventListener('click', () => {
 
 document.getElementById('closeResetSuccess')?.addEventListener('click', closeResetModal);
 
+import * as THREE from 'three';
+
+// --- 3D Background Mosaic Tiles ---
+function init3DBackground() {
+  const canvas = document.getElementById('bg-canvas') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  
+  const scene = new THREE.Scene();
+
+  // Create an isometric camera
+  const aspect = window.innerWidth / window.innerHeight;
+  const d = 25;
+  const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+  camera.position.set(30, 30, 30);
+  camera.lookAt(scene.position);
+
+  // Lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+  
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(10, 20, 10);
+  scene.add(dirLight);
+
+  // Blue accent point light
+  const pointLight = new THREE.PointLight(0x3b82f6, 500, 150);
+  pointLight.position.set(0, 15, 0);
+  scene.add(pointLight);
+
+  // Instanced mesh for tiles
+  const gridSize = 35; // 35x35 grid
+  const boxSize = 1.95;
+  const geometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+  
+  // Dark metallic material
+  const material = new THREE.MeshStandardMaterial({ 
+    color: 0x0a0a0a, 
+    roughness: 0.1, 
+    metalness: 0.8 
+  });
+  
+  const mesh = new THREE.InstancedMesh(geometry, material, gridSize * gridSize);
+  
+  const dummy = new THREE.Object3D();
+  let idx = 0;
+  const offset = (gridSize * 2) / 2;
+  
+  for (let x = 0; x < gridSize; x++) {
+    for (let z = 0; z < gridSize; z++) {
+      const posX = x * 2 - offset;
+      const posZ = z * 2 - offset;
+      dummy.position.set(posX, 0, posZ);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(idx++, dummy.matrix);
+    }
+  }
+  scene.add(mesh);
+
+  // Animation loop
+  const clock = new THREE.Clock();
+  function animate() {
+    requestAnimationFrame(animate);
+    const time = clock.getElapsedTime();
+    
+    // Animate tiles in a gentle wave pattern
+    let i = 0;
+    for (let x = 0; x < gridSize; x++) {
+      for (let z = 0; z < gridSize; z++) {
+        const posX = x * 2 - offset;
+        const posZ = z * 2 - offset;
+        
+        // sine wave math
+        const y = Math.sin(posX * 0.15 + time * 0.8) * Math.cos(posZ * 0.15 + time * 0.8) * 2;
+        
+        dummy.position.set(posX, y, posZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i++, dummy.matrix);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    
+    // Slow rotation of the scene for a dynamic feel
+    scene.rotation.y = time * 0.03;
+
+    renderer.render(scene, camera);
+  }
+  
+  animate();
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.left = -d * aspect;
+    camera.right = d * aspect;
+    camera.top = d;
+    camera.bottom = -d;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+init3DBackground();
+
