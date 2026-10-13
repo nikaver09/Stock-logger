@@ -5,150 +5,570 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>StockLogger · Sign In</title>
   <meta name="description" content="Sign in to StockLogger — warehouse inventory management." />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
+    
+    :root {
+      --bg: #f2f0ed;
+      --bg-subtle: #eae7e3;
+      --panel: #ffffff;
+      --line: #d4d0cb;
+      --text: #1a1a1a;
+      --text-secondary: #4a4a4a;
+      --muted: #8a8a8a;
+      --out: #c43e2a;
+      --mono: 'Space Mono', 'IBM Plex Mono', 'Courier New', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    ::selection {
+      background: rgba(0,0,0,0.15);
+      color: var(--text);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 3D Background Canvas */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(242,240,237,0.92);
+      backdrop-filter: blur(4px);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.3s;
+    }
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .loading-icon-wrap {
+      width: 48px; height: 48px;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      background: var(--panel);
+    }
+    .loading-spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--line);
+      border-top-color: var(--text);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    .loading-label {
+      font: 400 11px var(--mono);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* Card container */
+    .auth-card {
+      width: 100%;
+      max-width: 420px;
+      padding: 0 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .auth-inner {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 40px 36px;
+      position: relative;
+    }
+
+    /* Top accent line */
+    .auth-inner::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--text);
+    }
+
+    /* Logo */
+    .auth-logo {
+      width: 48px; height: 48px;
+      background: var(--text);
+      color: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+
+    .auth-title {
+      font: 700 14px var(--mono);
+      text-align: center;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .auth-subtitle {
+      font: 400 11px var(--mono);
+      text-align: center;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    /* Tab switcher */
+    .tab-switcher {
+      display: flex;
+      border: 1px solid var(--line);
+      margin-bottom: 28px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 11px;
+      font: 600 11px var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn:first-child { border-right: 1px solid var(--line); }
+    .tab-btn.active {
+      background: var(--text);
+      color: var(--panel);
+    }
+
+    /* Form inputs */
+    .form-group {
+      margin-bottom: 14px;
+    }
+    .form-label {
+      display: block;
+      font: 600 10px var(--mono);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    .input-wrap {
+      position: relative;
+    }
+    .input-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      width: 16px; height: 16px;
+      pointer-events: none;
+    }
+    .auth-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 11px 12px 11px 38px;
+      font: 400 13px var(--mono);
+      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+    .auth-input::placeholder { color: var(--muted); }
+    .auth-input:focus {
+      border-color: var(--text);
+      box-shadow: 0 0 0 1px var(--text);
+    }
+
+    /* Error message */
+    .auth-error {
+      font: 400 11px var(--mono);
+      color: var(--out);
+      margin-top: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: none;
+    }
+    .auth-error.visible { display: block; }
+
+    /* Submit button */
+    .auth-submit {
+      width: 100%;
+      padding: 13px;
+      background: var(--text);
+      color: var(--panel);
+      border: none;
+      font: 700 12px var(--mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .auth-submit:hover { opacity: 0.85; }
+    .auth-submit:active { transform: translateY(1px); }
+
+    /* Forgot password */
+    .auth-forgot {
+      display: block;
+      margin-top: 18px;
+      text-align: center;
+      font: 400 11px var(--mono);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .auth-forgot:hover { color: var(--text); }
+
+    /* Panel visibility */
+    .panel-hidden { display: none; }
+
+    /* ── Reset Modal ── */
+    .reset-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(242,240,237,0.88);
+      backdrop-filter: blur(6px);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .reset-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+    .reset-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 32px;
+      max-width: 380px;
+      width: 100%;
+      margin: 0 16px;
+      position: relative;
+      transform: translateY(12px);
+      transition: transform 0.3s cubic-bezier(.34,1.56,.64,1);
+    }
+    .reset-overlay.open .reset-card {
+      transform: translateY(0);
+    }
+    .reset-close {
+      position: absolute;
+      top: 14px; right: 14px;
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      width: 28px; height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .reset-close:hover { color: var(--text); border-color: var(--text); }
+
+    .reset-icon {
+      width: 44px; height: 44px;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .reset-title {
+      font: 700 13px var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .reset-desc {
+      font: 400 12px var(--mono);
+      color: var(--muted);
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+    .reset-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 11px 12px;
+      font: 400 13px var(--mono);
+      margin-bottom: 12px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .reset-input:focus { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+    .reset-input::placeholder { color: var(--muted); }
+
+    .reset-msg {
+      font: 400 11px var(--mono);
+      color: var(--out);
+      margin-bottom: 12px;
+      display: none;
+    }
+    .reset-msg.error { display: block; }
+    .reset-msg.visible { display: block; }
+
+    .reset-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .reset-btn-cancel {
+      flex: 1;
+      padding: 11px;
+      background: transparent;
+      border: 1px solid var(--line);
+      font: 500 11px var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .reset-btn-cancel:hover { border-color: var(--text); }
+    .reset-btn-confirm {
+      flex: 1;
+      padding: 11px;
+      background: var(--text);
+      border: none;
+      font: 600 11px var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--panel);
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .reset-btn-confirm:hover { opacity: 0.85; }
+
+    /* Success step */
+    .reset-success-icon {
+      width: 44px; height: 44px;
+      border: 1px solid rgba(45,138,78,0.3);
+      background: rgba(45,138,78,0.06);
+      color: #2d8a4e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .reset-success-text {
+      font: 600 12px var(--mono);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .reset-success-info {
+      font: 400 12px var(--mono);
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.7;
+    }
+    .reset-btn-done {
+      width: 100%;
+      padding: 11px;
+      background: var(--text);
+      border: none;
+      font: 600 11px var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--panel);
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .reset-btn-done:hover { opacity: 0.85; }
+
+    .hidden { display: none !important; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-4px); }
+      40%, 80% { transform: translateX(4px); }
+    }
+
+    /* ── Corner label ── */
+    .corner-label {
+      position: fixed;
+      bottom: 20px;
+      right: 24px;
+      font: 400 10px var(--mono);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      z-index: 2;
+    }
+  </style>
 </head>
-<body class="bg-[#0a0a0a] flex items-center justify-center min-h-screen font-sans antialiased text-white selection:bg-blue-500/30">
+<body>
 
   <!-- 3D Background Canvas -->
-  <canvas id="bg-canvas" class="fixed inset-0 z-[-1]"></canvas>
+  <canvas id="bg-canvas"></canvas>
 
   <!-- Loading overlay -->
-  <div id="loadingOverlay" class="fixed inset-0 bg-[#0a0a0a]/90 backdrop-blur-sm z-50 flex items-center justify-center hidden transition-opacity duration-300">
-    <div class="flex flex-col items-center">
-      <div class="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center mb-4 bg-zinc-900">
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-inner">
+      <div class="loading-icon-wrap">
         <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
-          <path d="M7 20V12l7-4 7 4v8l-7 4-7-4Z" stroke="#3b82f6" stroke-width="2" fill="none"/>
-          <path d="M14 8l-7 4m7-4 7 4m-7-4v4m0 0-7 4m7-4 7 4m-7-4v8" stroke="#3b82f6" stroke-width="1.4" opacity=".7"/>
+          <path d="M7 20V12l7-4 7 4v8l-7 4-7-4Z" stroke="#1a1a1a" stroke-width="2" fill="none"/>
+          <path d="M14 8l-7 4m7-4 7 4m-7-4v4m0 0-7 4m7-4 7 4m-7-4v8" stroke="#1a1a1a" stroke-width="1.4" opacity=".5"/>
         </svg>
       </div>
-      <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-      <div class="text-sm text-zinc-400 loading-text">Authenticating...</div>
+      <div class="loading-spinner"></div>
+      <div class="loading-label loading-text">Authenticating...</div>
     </div>
   </div>
 
-  <div class="w-full max-w-[400px] px-5">
-    <!-- Card -->
-    <div class="bg-[#121212] border border-white/5 rounded-2xl p-8 sm:p-10 relative overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-      
-      <!-- Top glow effect -->
-      <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-      <div class="absolute -top-10 inset-x-0 h-20 bg-blue-500/10 blur-3xl rounded-full pointer-events-none"></div>
+  <div class="auth-card">
+    <div class="auth-inner">
 
       <!-- Logo -->
-      <div class="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center mx-auto mb-6 bg-[#18181b] shadow-inner">
+      <div class="auth-logo">
         <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-          <path d="M7 20V12l7-4 7 4v8l-7 4-7-4Z" stroke="#e4e4e7" stroke-width="2" fill="none"/>
-          <path d="M14 8l-7 4m7-4 7 4m-7-4v4m0 0-7 4m7-4 7 4m-7-4v8" stroke="#e4e4e7" stroke-width="1.4" opacity=".7"/>
+          <path d="M7 20V12l7-4 7 4v8l-7 4-7-4Z" stroke="#f2f0ed" stroke-width="2" fill="none"/>
+          <path d="M14 8l-7 4m7-4 7 4m-7-4v4m0 0-7 4m7-4 7 4m-7-4v8" stroke="#f2f0ed" stroke-width="1.4" opacity=".6"/>
         </svg>
       </div>
 
-      <h1 class="text-[22px] font-semibold text-center mb-1 tracking-tight">Welcome Back</h1>
-      <p class="text-sm text-zinc-400 text-center mb-6">StockLogger Authentication</p>
+      <h1 class="auth-title">Welcome Back</h1>
+      <p class="auth-subtitle">StockLogger Authentication</p>
 
       <!-- Tab switcher -->
-      <div class="flex bg-[#18181b] rounded-lg p-1 mb-6" role="tablist">
-        <button id="tabCashier" class="flex-1 text-sm font-medium py-2 rounded-md transition-all text-white bg-[#27272a] shadow-sm" role="tab" aria-selected="true" aria-controls="panelCashier">Cashier</button>
-        <button id="tabAdmin" class="flex-1 text-sm font-medium py-2 rounded-md transition-all text-zinc-500 hover:text-white" role="tab" aria-selected="false" aria-controls="panelAdmin">Admin</button>
+      <div class="tab-switcher" role="tablist">
+        <button id="tabCashier" class="tab-btn active" role="tab" aria-selected="true" aria-controls="panelCashier">Cashier</button>
+        <button id="tabAdmin" class="tab-btn" role="tab" aria-selected="false" aria-controls="panelAdmin">Admin</button>
       </div>
 
       <!-- ── Cashier Panel ── -->
-      <div id="panelCashier" class="block" role="tabpanel" aria-labelledby="tabCashier">
+      <div id="panelCashier" role="tabpanel" aria-labelledby="tabCashier">
         <form id="employeeForm" autocomplete="off" novalidate>
-          <div class="space-y-3">
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <svg class="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              </div>
-              <input type="text" id="empUsername" class="w-full bg-[#18181b] text-white text-sm rounded-lg focus:ring-1 focus:ring-blue-500 block pl-10 p-3.5 outline-none transition-all placeholder-zinc-500" placeholder="Username" required autocomplete="username" />
+          <div class="form-group">
+            <div class="input-wrap">
+              <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              <input type="text" id="empUsername" class="auth-input" placeholder="Username" required autocomplete="username" />
             </div>
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <svg class="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-              </div>
-              <input type="password" id="empPassword" class="w-full bg-[#18181b] text-white text-sm rounded-lg focus:ring-1 focus:ring-blue-500 block pl-10 p-3.5 outline-none transition-all placeholder-zinc-500" placeholder="Password" required autocomplete="current-password" />
+          </div>
+          <div class="form-group">
+            <div class="input-wrap">
+              <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              <input type="password" id="empPassword" class="auth-input" placeholder="Password" required autocomplete="current-password" />
             </div>
           </div>
 
-          <div class="text-sm text-red-400 mt-3 hidden" id="empMsg" role="status"></div>
+          <div class="auth-error" id="empMsg" role="status"></div>
 
-          <button type="submit" id="empBtn" class="w-full text-white bg-blue-600 hover:bg-blue-500 font-medium rounded-lg text-sm px-5 py-3.5 text-center transition-all mt-6 shadow-lg shadow-blue-500/20">
+          <button type="submit" id="empBtn" class="auth-submit">
             <span id="empBtnText">Login</span>
           </button>
           
-          <div class="mt-5 text-center">
-            <button type="button" class="text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors" id="forgotCashier">Forgot password?</button>
-          </div>
+          <button type="button" class="auth-forgot" id="forgotCashier">Forgot password?</button>
         </form>
       </div>
 
       <!-- ── Admin Panel ── -->
-      <div id="panelAdmin" class="hidden" role="tabpanel" aria-labelledby="tabAdmin">
+      <div id="panelAdmin" class="panel-hidden" role="tabpanel" aria-labelledby="tabAdmin">
         <form id="adminForm" autocomplete="off" novalidate>
-          <div class="space-y-3">
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <svg class="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              </div>
-              <input type="text" id="adminUsername" class="w-full bg-[#18181b] text-white text-sm rounded-lg focus:ring-1 focus:ring-blue-500 block pl-10 p-3.5 outline-none transition-all placeholder-zinc-500" placeholder="Admin Username" required autocomplete="username" />
+          <div class="form-group">
+            <div class="input-wrap">
+              <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              <input type="text" id="adminUsername" class="auth-input" placeholder="Admin Username" required autocomplete="username" />
             </div>
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <svg class="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-              </div>
-              <input type="password" id="adminPassword" class="w-full bg-[#18181b] text-white text-sm rounded-lg focus:ring-1 focus:ring-blue-500 block pl-10 p-3.5 outline-none transition-all placeholder-zinc-500" placeholder="Password" required autocomplete="current-password" />
+          </div>
+          <div class="form-group">
+            <div class="input-wrap">
+              <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              <input type="password" id="adminPassword" class="auth-input" placeholder="Password" required autocomplete="current-password" />
             </div>
           </div>
 
-          <div class="text-sm text-red-400 mt-3 hidden" id="adminMsg" role="status"></div>
+          <div class="auth-error" id="adminMsg" role="status"></div>
 
-          <button type="submit" id="adminBtn" class="w-full text-white bg-blue-600 hover:bg-blue-500 font-medium rounded-lg text-sm px-5 py-3.5 text-center transition-all mt-6 shadow-lg shadow-blue-500/20">
+          <button type="submit" id="adminBtn" class="auth-submit">
             <span id="adminBtnText">Login</span>
           </button>
           
-          <div class="mt-5 text-center">
-            <button type="button" class="text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors" id="forgotAdmin">Forgot password?</button>
-          </div>
+          <button type="button" class="auth-forgot" id="forgotAdmin">Forgot password?</button>
         </form>
       </div>
 
     </div>
   </div>
 
+  <!-- Corner label -->
+  <div class="corner-label">StockLogger v1.0</div>
+
   <!-- ── Reset Password Modal ── -->
-  <div id="resetModal" class="fixed inset-0 bg-[#0a0a0a]/80 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-200" role="dialog" aria-modal="true" aria-labelledby="resetModalTitle">
-    <div class="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl relative">
-      <button class="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors" id="closeResetModal" aria-label="Close">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  <div id="resetModal" class="reset-overlay" role="dialog" aria-modal="true" aria-labelledby="resetModalTitle">
+    <div class="reset-card">
+      <button class="reset-close" id="closeResetModal" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
       
-      <div class="w-10 h-10 rounded-full bg-zinc-800/50 border border-white/5 flex items-center justify-center mb-4 text-zinc-300">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <div class="reset-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="0" ry="0"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
       
-      <h2 id="resetModalTitle" class="text-lg font-semibold mb-2">Reset Password</h2>
-      <p class="text-sm text-zinc-400 mb-6">Your password will be reset to the <strong>default</strong>. Enter your username to confirm.</p>
+      <h2 id="resetModalTitle" class="reset-title">Reset Password</h2>
+      <p class="reset-desc">Your password will be reset to the <strong>default</strong>. Enter your username to confirm.</p>
 
-      <!-- Step 1: enter username -->
+      <!-- Step 1 -->
       <div id="resetStep1">
-        <div class="mb-4">
-          <input type="text" id="resetUsername" class="w-full bg-[#0a0a0a] border border-white/5 text-white text-sm rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none transition-all placeholder-zinc-600" placeholder="Enter your username" autocomplete="off" />
-        </div>
-        <p id="resetMsg" class="text-sm text-red-400 mb-4 hidden" role="status"></p>
-        <div class="flex gap-3">
-          <button type="button" id="cancelResetModal" class="flex-1 py-2.5 px-4 bg-[#1a1a1a] hover:bg-zinc-800 text-sm font-medium rounded-lg transition-colors border border-white/5 text-zinc-300">Cancel</button>
-          <button type="button" id="confirmReset" class="flex-1 py-2.5 px-4 bg-white text-black hover:bg-zinc-200 text-sm font-medium rounded-lg transition-colors">Reset</button>
+        <input type="text" id="resetUsername" class="reset-input" placeholder="Enter your username" autocomplete="off" />
+        <p id="resetMsg" class="reset-msg" role="status"></p>
+        <div class="reset-actions">
+          <button type="button" id="cancelResetModal" class="reset-btn-cancel">Cancel</button>
+          <button type="button" id="confirmReset" class="reset-btn-confirm">Reset</button>
         </div>
       </div>
 
       <!-- Step 2: success -->
       <div id="resetStep2" class="hidden">
-        <div class="w-10 h-10 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center mb-4">
+        <div class="reset-success-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-        <p class="text-white font-medium mb-1">Password reset successfully!</p>
-        <p id="resetSuccessInfo" class="text-sm text-zinc-400 mb-6"></p>
-        <button type="button" id="closeResetSuccess" class="w-full py-2.5 px-4 bg-white text-black hover:bg-zinc-200 text-sm font-medium rounded-lg transition-colors">Got it</button>
+        <p class="reset-success-text">Password reset successfully!</p>
+        <p id="resetSuccessInfo" class="reset-success-info"></p>
+        <button type="button" id="closeResetSuccess" class="reset-btn-done">Got it</button>
       </div>
     </div>
   </div>
@@ -163,15 +583,12 @@
     function switchTab(active) {
       Object.entries(tabs).forEach(([key, { btn, panel }]) => {
         const isActive = key === active;
-        
         if (isActive) {
-          btn.className = "flex-1 text-sm font-medium py-2 rounded-md transition-all text-white bg-[#1a1a1a] shadow-sm border border-white/5";
-          panel.classList.remove('hidden');
-          panel.classList.add('block');
+          btn.classList.add('active');
+          panel.classList.remove('panel-hidden');
         } else {
-          btn.className = "flex-1 text-sm font-medium py-2 rounded-md transition-all text-zinc-500 hover:text-white border border-transparent";
-          panel.classList.add('hidden');
-          panel.classList.remove('block');
+          btn.classList.remove('active');
+          panel.classList.add('panel-hidden');
         }
         btn.setAttribute('aria-selected', String(isActive));
       });
@@ -180,44 +597,33 @@
     tabs.cashier.btn.addEventListener('click', () => switchTab('cashier'));
     tabs.admin.btn.addEventListener('click',   () => switchTab('admin'));
 
-    // Observe modal open class since we removed custom CSS class logic in favor of Tailwind classes
+    // Observe modal open class
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.attributeName === 'class') {
           const resetOverlay = document.getElementById('resetModal');
-          if (resetOverlay.classList.contains('open')) {
-             resetOverlay.classList.remove('opacity-0', 'pointer-events-none');
-          } else {
-             resetOverlay.classList.add('opacity-0', 'pointer-events-none');
-          }
+          // Already handled by CSS .open class
         }
       });
     });
     observer.observe(document.getElementById('resetModal'), { attributes: true });
 
-    // Override the display logic for errors to use Tailwind hidden class instead of textContent only
-    const originalShowError = window.showError;
-    const originalClearError = window.clearError;
-    
-    // We will let the login.ts run and manipulate classes slightly if needed
-    // But login.ts might add/remove 'error' class which doesn't do anything now.
-    // So we will patch the DOM so the hidden class is toggled.
+    // Patch error messages to toggle visibility
     const patchMsg = (id) => {
       const el = document.getElementById(id);
       if(!el) return;
-      const observer = new MutationObserver(() => {
+      const obs = new MutationObserver(() => {
         if(el.textContent.trim() !== '') {
-          el.classList.remove('hidden');
+          el.classList.add('visible');
         } else {
-          el.classList.add('hidden');
+          el.classList.remove('visible');
         }
       });
-      observer.observe(el, { childList: true, characterData: true, subtree: true });
+      obs.observe(el, { childList: true, characterData: true, subtree: true });
     };
     patchMsg('empMsg');
     patchMsg('adminMsg');
     patchMsg('resetMsg');
-
   </script>
 
   <script type="module" src="/src/login.ts"></script>

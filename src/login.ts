@@ -100,6 +100,8 @@ document.getElementById('adminForm')?.addEventListener('submit', (e) => {
   }, 600);
 });
 
+
+
 /* ── loading overlay ── */
 window.addEventListener('load', () => {
   setTimeout(() => {
@@ -230,9 +232,9 @@ function init3DBackground() {
   const boxSize = 1.95;
   const geometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
   
-  // Dark metallic material
+  // Metallic material with #999999 color
   const material = new THREE.MeshStandardMaterial({ 
-    color: 0x0a0a0a, 
+    color: 0x999999, 
     roughness: 0.1, 
     metalness: 0.8 
   });

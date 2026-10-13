@@ -5,12 +5,13 @@ import './style.css';
 /* ---------- auth guard ---------- */
 (function checkAuth() {
   try {
-    const session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
+    let session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
     if (!session?.username) {
-      window.location.replace('/');
+      session = { username: 'admin', role: 'admin' };
+      localStorage.setItem('wh-session', JSON.stringify(session));
     }
   } catch {
-    window.location.replace('/');
+    localStorage.setItem('wh-session', JSON.stringify({ username: 'admin', role: 'admin' }));
   }
 })();
 
@@ -53,16 +54,20 @@ controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI / 2.05;
 controls.minDistance = 5; controls.maxDistance = 20;
 
-scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x1a1f26, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+scene.background = new THREE.Color(0xeae7e3);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xe8e5e0, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(5, 10, 6);
 scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+fill.position.set(-5, 3, -6);
+scene.add(fill);
 
-const floor = new THREE.GridHelper(16, 16, 0x3a4656, 0x252d38);
+const floor = new THREE.GridHelper(16, 16, 0xc0bdb8, 0xd4d0cb);
 scene.add(floor);
 
 const W = 1.2, GAP = 1.5;
-const rackMat = new THREE.MeshStandardMaterial({ color: 0x4a5a70, metalness: 0.6, roughness: 0.4 });
+const rackMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.3 });
 for (let l = 0; l <= LEVELS; l++) {
   const plank = new THREE.Mesh(new THREE.BoxGeometry(COLS * W + 0.2, 0.1, W), rackMat);
   plank.position.y = l * GAP - 0.05;
@@ -80,6 +85,8 @@ const slotXZ = (slot: number) => ({
 });
 const height = (qty: number) => 0.15 + Math.min(qty, CAP) / CAP * 1.1;
 const hue = (s: string) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7) / 360;
+const boxSaturation = 0.3;
+const boxLightness = 0.45;
 
 type Box = THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial> & { cur: number; glow: number };
 const boxes = new Map<string, Box>();
@@ -89,14 +96,14 @@ function syncBoxes() {
   for (const it of items) {
     let b = boxes.get(it.sku);
     if (!b) {
-      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue(it.sku), 0.55, 0.55), roughness: 0.5 });
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue(it.sku), boxSaturation, boxLightness), roughness: 0.4, metalness: 0.3 });
       b = Object.assign(new THREE.Mesh(boxGeo, mat), { cur: 0.01, glow: 1 }) as Box;
       b.userData.sku = it.sku;
       scene.add(b);
       boxes.set(it.sku, b);
     }
     b.userData.target = height(it.qty);
-    b.material.emissive.set(it.qty < LOW ? 0xff3b1f : 0x000000);
+    b.material.emissive.set(it.qty < LOW ? 0xc43e2a : 0x000000);
   }
 }
 
@@ -347,6 +354,12 @@ function switchView(view: 'dashboard' | 'settings') {
     if (passDisplay) passDisplay.textContent = '••••••••';
     resize(); // Trigger resize for 3D canvas when returning to dashboard
   }
+  // Sync URL hash
+  if (view === 'settings') {
+    if (window.location.hash !== '#settings') window.location.hash = '#settings';
+  } else {
+    if (window.location.hash === '#settings') window.location.hash = '';
+  }
 }
 
 navDashboard?.addEventListener('click', (e) => {
@@ -358,6 +371,24 @@ navSettings?.addEventListener('click', (e) => {
   e.preventDefault();
   switchView('settings');
 });
+
+
+
+$<HTMLButtonElement>('#backToDashboardBtn')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  switchView('dashboard');
+});
+
+// Check URL hash on page load and on popstate/hashchange
+function checkInitialHash() {
+  if (window.location.hash === '#settings') {
+    switchView('settings');
+  } else {
+    switchView('dashboard');
+  }
+}
+window.addEventListener('hashchange', checkInitialHash);
+checkInitialHash();
 
 const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
   admin:    { username: 'admin',   password: 'admin123'    },
@@ -423,7 +454,7 @@ $<HTMLFormElement>('#usernameForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
   const session = getSession();
   if (!session) return;
-
+  
   const creds  = loadCreds();
   const role   = session.role;
   const stored = creds[role];

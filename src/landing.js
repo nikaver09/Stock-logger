@@ -1,10 +1,27 @@
+import Lenis from 'lenis';
+import 'lenis/dist/lenis.css';
 import './landing.css';
+
+/* ─── Lenis smooth scrolling ─── */
+const lenis = new Lenis({
+  duration: 1.2,
+  easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+  smoothWheel: true,
+  touchMultiplier: 2,
+});
+
+function raf(time) {
+  lenis.raf(time);
+  requestAnimationFrame(raf);
+}
+requestAnimationFrame(raf);
 
 /* ─── Nav scroll effect ─── */
 const nav = document.getElementById('nav');
 window.addEventListener('scroll', () => {
   nav?.classList.toggle('scrolled', window.scrollY > 20);
 }, { passive: true });
+
 
 /* ─── Mobile nav toggle ─── */
 window.toggleNav = function () {
@@ -19,11 +36,13 @@ window.openModal = function (which) {
   const id = which === 'login' ? 'loginModal' : 'signupModal';
   document.getElementById(id)?.classList.add('open');
   document.body.style.overflow = 'hidden';
+  lenis.stop();
 };
 
 window.closeModal = function (id) {
   document.getElementById(id)?.classList.remove('open');
   document.body.style.overflow = '';
+  lenis.start();
 };
 
 window.overlayClose = function (e, id) {
@@ -42,6 +61,7 @@ document.addEventListener('keydown', (e) => {
       el.classList.remove('open');
       document.body.style.overflow = '';
     });
+    lenis.start();
   }
 });
 
