@@ -1,4 +1,7 @@
 import './login.css';
+import { enablePasswordToggles } from './password-toggle';
+
+enablePasswordToggles();
 
 function showLoader(text: string) {
   const loader = document.getElementById('loadingOverlay');
@@ -35,13 +38,92 @@ const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
   admin:    { username: 'admin',   password: 'admin123'    },
   employee: { username: 'cashier', password: 'password123' },
 };
+type UserAccount = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean; password: string };
+
+function readUsers(fallback: UserAccount[]): UserAccount[] {
+  const stored = localStorage.getItem('wh-users');
+  if (stored === null) return fallback;
+  try {
+    const parsed = JSON.parse(stored) as Array<Partial<UserAccount> & { name?: string; pw?: string }>;
+    if (!Array.isArray(parsed)) return fallback;
+    const users = parsed.flatMap((value, index) => {
+      if (!value || typeof value !== 'object') return [];
+      const email = typeof value.email === 'string' ? value.email.trim() : '';
+      const username = typeof value.username === 'string' && value.username.trim() ? value.username.trim() : email.split('@')[0];
+      if (!username) return [];
+      const parts = typeof value.name === 'string' ? value.name.trim().split(/\s+/) : [];
+      let password = typeof value.password === 'string' ? value.password : typeof value.pw === 'string' ? value.pw : '';
+      if (typeof value.password !== 'string' && password) { try { password = atob(password); } catch { /* Keep an unencoded legacy value as-is. */ } }
+      return [{
+        id: typeof value.id === 'string' && value.id ? value.id : `migrated-${index}-${username.toLowerCase()}`,
+        username, role: value.role === 'admin' ? 'admin' as const : 'employee' as const,
+        firstName: typeof value.firstName === 'string' ? value.firstName : parts[0] ?? '',
+        lastName: typeof value.lastName === 'string' ? value.lastName : parts.slice(1).join(' '),
+        email, active: typeof value.active === 'boolean' ? value.active : true, password,
+      }];
+    });
+    if (!users.length) return fallback;
+    const canonical = JSON.stringify(users);
+    if (canonical !== stored) localStorage.setItem('wh-users', canonical);
+    return users;
+  } catch { return fallback; }
+}
 
 function getCreds(): Record<string, { username: string; password: string }> {
   try {
-    return JSON.parse(localStorage.getItem('wh-credentials') ?? '') as typeof DEFAULT_CREDS;
+    const stored = JSON.parse(localStorage.getItem('wh-credentials') ?? 'null') as Partial<typeof DEFAULT_CREDS> | null;
+    return {
+      admin: typeof stored?.admin?.username === 'string' && typeof stored.admin.password === 'string' ? stored.admin : DEFAULT_CREDS.admin,
+      employee: typeof stored?.employee?.username === 'string' && typeof stored.employee.password === 'string' ? stored.employee : DEFAULT_CREDS.employee,
+    };
   } catch {
-    return JSON.parse(JSON.stringify(DEFAULT_CREDS));
+    return { ...DEFAULT_CREDS };
   }
+}
+
+function getUsers(): UserAccount[] {
+  const creds = getCreds();
+  const builtinUsers: UserAccount[] = [
+    { id: 'builtin-admin', username: creds.admin?.username ?? 'admin', role: 'admin', firstName: 'System', lastName: 'Administrator', email: 'admin@example.com', active: true, password: creds.admin?.password ?? 'admin123' },
+    { id: 'builtin-employee', username: creds.employee?.username ?? 'cashier', role: 'employee', firstName: 'Store', lastName: 'Cashier', email: 'cashier@example.com', active: true, password: creds.employee?.password ?? 'password123' },
+  ];
+  const users = readUsers(builtinUsers);
+  for (const builtin of builtinUsers) {
+    const knownNames = [builtin.username, builtin.id === 'builtin-admin' ? DEFAULT_CREDS.admin.username : DEFAULT_CREDS.employee.username]
+      .map((name) => name.toLowerCase());
+    const index = users.findIndex((user) => user.id === builtin.id || knownNames.includes(user.username.toLowerCase()));
+    if (index < 0) {
+      users.push(builtin);
+      continue;
+    }
+
+    const existing = users[index];
+    users[index] = {
+      ...existing,
+      ...builtin,
+      // Keep an intentionally disabled built-in account disabled.
+      active: existing.active,
+      firstName: existing.firstName || builtin.firstName,
+      lastName: existing.lastName || builtin.lastName,
+      email: existing.email || builtin.email,
+    };
+  }
+  localStorage.setItem('wh-users', JSON.stringify(users));
+  return users;
+}
+
+function recordAuthAudit(handledBy: string, action: string, description: string) {
+  let entries: Array<Record<string, unknown>> = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem('wh-audit-logs') ?? '[]');
+    if (Array.isArray(stored)) entries = stored;
+  } catch { /* Start a clean audit trail if stored data is malformed. */ }
+  entries.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(), handledBy, module: 'Authentication', action, description,
+    ipAddress: 'Unavailable in local browser',
+  });
+  localStorage.setItem('wh-audit-logs', JSON.stringify(entries.slice(0, 1000)));
 }
 
 /* ── Cashier (employee) form ── */
@@ -50,21 +132,23 @@ document.getElementById('employeeForm')?.addEventListener('submit', (e) => {
   const usernameInput = document.getElementById('empUsername') as HTMLInputElement;
   const passwordInput = document.getElementById('empPassword') as HTMLInputElement;
   const username = usernameInput?.value.trim();
-  const password = passwordInput?.value.trim();
+  const password = passwordInput?.value;
 
   if (!username || !password) {
     showError('empMsg', 'Please enter both username and password.');
     return;
   }
 
-  const creds = getCreds();
-  if (username !== creds.employee.username || password !== creds.employee.password) {
+  const account = getUsers().find((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === username.toLowerCase());
+  const valid = !!account && account.active && account.role === 'employee' && account.password === password;
+  if (!valid) {
     showError('empMsg', 'Invalid username or password.');
     return;
   }
 
   clearError('empMsg');
-  localStorage.setItem('wh-session', JSON.stringify({ username, role: 'employee' }));
+  recordAuthAudit(account.username, 'Signed in', 'Cashier signed in.');
+  localStorage.setItem('wh-session', JSON.stringify({ username: account.username, role: account.role }));
   
   showLoader('Authenticating as Cashier...');
   setTimeout(() => {
@@ -78,21 +162,23 @@ document.getElementById('adminForm')?.addEventListener('submit', (e) => {
   const usernameInput = document.getElementById('adminUsername') as HTMLInputElement;
   const passwordInput = document.getElementById('adminPassword') as HTMLInputElement;
   const username = usernameInput?.value.trim();
-  const password = passwordInput?.value.trim();
+  const password = passwordInput?.value;
 
   if (!username || !password) {
     showError('adminMsg', 'Please enter both username and password.');
     return;
   }
 
-  const creds = getCreds();
-  if (username !== creds.admin.username || password !== creds.admin.password) {
+  const account = getUsers().find((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === username.toLowerCase());
+  const valid = !!account && account.active && account.role === 'admin' && account.password === password;
+  if (!valid) {
     showError('adminMsg', 'Invalid username or password.');
     return;
   }
 
   clearError('adminMsg');
-  localStorage.setItem('wh-session', JSON.stringify({ username, role: 'admin' }));
+  recordAuthAudit(account.username, 'Signed in', 'Admin signed in.');
+  localStorage.setItem('wh-session', JSON.stringify({ username: account.username, role: account.role }));
   
   showLoader('Authenticating as Admin...');
   setTimeout(() => {
@@ -159,12 +245,15 @@ document.getElementById('confirmReset')?.addEventListener('click', () => {
   }
 
   const creds = getCreds();
+  const users = getUsers();
+  const normalizedName = username.toLowerCase();
+  const account = users.find((user) => user.username.toLowerCase() === normalizedName || user.email.toLowerCase() === normalizedName);
 
-  // Determine which account matches
-  let roleKey: string | null = null;
-  if (username === creds.admin.username || username === DEFAULT_CREDS.admin.username) {
+  // Reset either a managed account or a legacy built-in account.
+  let roleKey: 'admin' | 'employee' | null = account?.role ?? null;
+  if (!roleKey && (normalizedName === creds.admin.username.toLowerCase() || normalizedName === DEFAULT_CREDS.admin.username)) {
     roleKey = 'admin';
-  } else if (username === creds.employee.username || username === DEFAULT_CREDS.employee.username) {
+  } else if (!roleKey && (normalizedName === creds.employee.username.toLowerCase() || normalizedName === DEFAULT_CREDS.employee.username)) {
     roleKey = 'employee';
   }
 
@@ -178,12 +267,22 @@ document.getElementById('confirmReset')?.addEventListener('click', () => {
   }
 
   // Reset password to default
-  const newCreds = JSON.parse(JSON.stringify(creds));
-  newCreds[roleKey].password = DEFAULT_CREDS[roleKey].password;
-  localStorage.setItem('wh-credentials', JSON.stringify(newCreds));
+  const newPassword = DEFAULT_CREDS[roleKey].password;
+  if (account) {
+    account.password = newPassword;
+    localStorage.setItem('wh-users', JSON.stringify(users));
+    if (account.id === 'builtin-admin' || account.id === 'builtin-employee') {
+      const newCreds = { ...creds, [roleKey]: { ...creds[roleKey], username: account.username, password: newPassword } };
+      localStorage.setItem('wh-credentials', JSON.stringify(newCreds));
+    }
+  } else {
+    const newCreds = { ...creds, [roleKey]: { ...creds[roleKey], password: newPassword } };
+    localStorage.setItem('wh-credentials', JSON.stringify(newCreds));
+  }
+  recordAuthAudit(account?.username ?? username, 'Password reset', 'Password reset to the default for this account.');
 
   // Show success step
-  const defaultPass = DEFAULT_CREDS[roleKey].password;
+  const defaultPass = newPassword;
   resetSuccessInfo.innerHTML =
     `New password: <strong>${defaultPass}</strong><br>` +
     `Please change it after logging in.`;

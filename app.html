@@ -105,6 +105,112 @@
           </main>
         </div>
 
+        <div id="salesView" style="display: none;">
+          <header class="sales-header">
+            <div>
+              <p class="eyebrow">WAREHOUSE / SALES</p>
+              <h1 id="salesPageTitle">Point of sale</h1>
+              <p class="sales-lead">Build an order from available stock and record every dispatch.</p>
+            </div>
+            <div class="sales-summary" id="salesSummary"></div>
+          </header>
+
+          <div class="sales-tabs" role="tablist" aria-label="Sales workspace">
+            <button class="sales-tab active" id="posTab" role="tab" aria-selected="true" data-sales-view="pos">Point of sale</button>
+            <button class="sales-tab" id="returnsTab" role="tab" aria-selected="false" data-sales-view="returns">Returns</button>
+          </div>
+
+          <section class="pos-layout" id="posPanel" aria-labelledby="posTab">
+            <div class="catalog-panel panel">
+              <div class="section-heading">
+                <div><p class="eyebrow">PRODUCT CATALOG</p><h2>Available items</h2></div>
+                <span class="count-chip" id="catalogCount">0 items</span>
+              </div>
+              <label class="search-field" for="productSearch">
+                <span aria-hidden="true">⌕</span>
+                <input id="productSearch" type="search" placeholder="Search by item name or SKU" autocomplete="off" />
+              </label>
+              <div id="productCatalog" class="product-catalog"></div>
+            </div>
+
+            <aside class="cart-panel panel">
+              <div class="section-heading">
+                <div><p class="eyebrow">CURRENT ORDER</p><h2>Sales cart</h2></div>
+                <span class="order-badge">DRAFT</span>
+              </div>
+              <label class="sales-field">Customer / account
+                <input id="saleCustomer" maxlength="80" placeholder="Walk-in customer" />
+              </label>
+              <label class="sales-field">Order reference <span class="optional">OPTIONAL</span>
+                <input id="saleReference" maxlength="60" placeholder="e.g. SO-1048" />
+              </label>
+              <div class="cart-lines" id="cartLines" aria-live="polite"></div>
+              <div class="cart-footer">
+                <div class="cart-total-row"><span>Line items</span><strong id="cartItemCount">0</strong></div>
+                <div class="cart-total-row"><span>Total units</span><strong id="cartUnitCount">0</strong></div>
+                <button class="checkout-button" id="completeSale" type="button" disabled>Complete sale <span aria-hidden="true">→</span></button>
+                <p id="saleMessage" class="sales-message" role="status"></p>
+              </div>
+            </aside>
+          </section>
+
+          <section class="returns-panel panel" id="returnsPanel" style="display:none" aria-labelledby="returnsTab">
+            <div class="section-heading returns-heading">
+              <div><p class="eyebrow">AFTER-SALE WORKFLOW</p><h2>Record a return</h2><p class="section-copy">Find a completed sale and restock returned units.</p></div>
+              <span class="count-chip" id="returnCount">0 completed sales</span>
+            </div>
+            <label class="search-field return-search" for="returnSearch"><span aria-hidden="true">⌕</span><input id="returnSearch" type="search" placeholder="Search order, customer or SKU" autocomplete="off" /></label>
+            <div id="salesHistory" class="sales-history"></div>
+            <p id="returnMessage" class="sales-message" role="status"></p>
+          </section>
+
+          <section class="recent-sales panel" id="recentSalesPanel">
+            <div class="section-heading"><div><p class="eyebrow">LATEST ACTIVITY</p><h2>Recent sales</h2></div><button type="button" class="text-action" id="viewAllReturns">View returns <span aria-hidden="true">→</span></button></div>
+            <div class="sales-table-wrap"><table class="sales-table" id="recentSales"></table></div>
+          </section>
+        </div>
+
+        <div id="suppliersView" style="display: none;">
+          <header class="users-header suppliers-header">
+            <div class="users-title"><span class="users-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h.01M15 10h.01M9 14h.01M15 14h.01M10 21v-3h4v3"/></svg></span><h1>Suppliers</h1></div>
+            <button type="button" class="users-add-button" id="addSupplierButton"><span aria-hidden="true">＋</span> Add supplier</button>
+          </header>
+          <section class="users-panel suppliers-panel">
+            <label class="users-search" for="supplierSearch"><span aria-hidden="true">⌕</span><input id="supplierSearch" type="search" placeholder="Filter by name..." autocomplete="off" /></label>
+            <div class="users-table-wrap suppliers-table-wrap"><table class="users-table suppliers-table" id="suppliersTable"></table></div>
+            <div class="users-pagination" id="suppliersPagination" aria-label="Supplier list pages"></div>
+            <p id="suppliersMessage" class="users-message" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+
+        <div id="auditLogsView" style="display: none;">
+          <header class="users-header audit-header">
+            <div class="users-title"><span class="users-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg></span><h1>Audit Logs</h1></div>
+          </header>
+          <section class="users-panel audit-panel">
+            <label class="users-search" for="auditSearch"><span aria-hidden="true">⌕</span><input id="auditSearch" type="search" placeholder="Filter by module..." autocomplete="off" /></label>
+            <div class="users-table-wrap audit-table-wrap"><table class="users-table audit-table" id="auditTable"></table></div>
+            <div class="users-pagination" id="auditPagination" aria-label="Audit log pages"></div>
+          </section>
+        </div>
+
+        <div id="usersView" style="display: none;">
+          <header class="users-header">
+            <div class="users-title"><span class="users-title-icon" aria-hidden="true">♙</span><h1>Users</h1></div>
+            <button type="button" class="users-add-button" id="addUserButton"><span aria-hidden="true">＋</span> Add user</button>
+          </header>
+          <section class="users-panel">
+            <div class="users-panel-heading">
+              <div><p class="eyebrow">ACCESS MANAGEMENT</p><h2>Workspace users</h2></div>
+              <span class="count-chip" id="userCount">0 users</span>
+            </div>
+            <label class="users-search" for="userSearch"><span aria-hidden="true">⌕</span><input id="userSearch" type="search" placeholder="Filter by username..." autocomplete="off" /></label>
+            <div class="users-table-wrap"><table class="users-table" id="usersTable"></table></div>
+            <div class="users-pagination" id="usersPagination" aria-label="User list pages"></div>
+            <p id="usersMessage" class="users-message" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+
         <div id="settingsView" style="display: none;">
           <div class="settings-header" style="display:flex; justify-content:space-between; align-items:center;">
             <div style="display:flex; align-items:center; gap:10px;">
@@ -162,6 +268,63 @@
               </div>
               <button id="logoutBtn" class="btn-danger">Log out</button>
             </div>
+          </div>
+        </div>
+
+        <div id="supplierModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="supplierModalTitle">
+          <div class="settings-modal supplier-modal">
+            <button class="settings-modal-close" id="closeSupplierModal" type="button" aria-label="Close">×</button>
+            <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h.01M15 10h.01M9 14h.01M15 14h.01M10 21v-3h4v3"/></svg></div>
+            <h3 id="supplierModalTitle" class="smodal-title">Add supplier</h3>
+            <p class="smodal-sub">Keep supplier contact details handy for purchasing and stock planning.</p>
+            <form id="supplierForm" class="smodal-form" autocomplete="off">
+              <input id="supplierId" type="hidden" />
+              <div class="smodal-field"><label for="supplierName">Supplier name</label><input id="supplierName" maxlength="100" required placeholder="e.g. Stark Industries" /></div>
+              <div class="smodal-field"><label for="supplierContact">Contact person</label><input id="supplierContact" maxlength="100" required placeholder="Full name" /></div>
+              <div class="user-form-grid">
+                <div class="smodal-field"><label for="supplierPhone">Phone number</label><input id="supplierPhone" type="tel" maxlength="40" required placeholder="Phone number" /></div>
+                <div class="smodal-field"><label for="supplierEmail">Email</label><input id="supplierEmail" type="email" maxlength="120" required placeholder="name@example.com" /></div>
+              </div>
+              <div class="smodal-field"><label for="supplierAddress">Address</label><input id="supplierAddress" maxlength="160" required placeholder="City, region" /></div>
+              <label class="user-active-toggle"><input id="supplierActive" type="checkbox" checked /> Active supplier</label>
+              <p id="supplierFormMessage" class="smodal-msg"></p>
+              <div class="smodal-actions"><button type="button" id="cancelSupplierModal" class="btn-outline">Cancel</button><button type="submit" class="btn-auth" id="saveSupplierButton" style="flex:1;">Add supplier</button></div>
+            </form>
+          </div>
+        </div>
+
+        <div id="auditDetailModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="auditDetailTitle">
+          <div class="settings-modal audit-detail-modal">
+            <button class="settings-modal-close" id="closeAuditDetail" type="button" aria-label="Close">×</button>
+            <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg></div>
+            <h3 id="auditDetailTitle" class="smodal-title">Audit entry</h3>
+            <dl class="audit-detail-list" id="auditDetailContent"></dl>
+            <div class="smodal-actions"><button type="button" id="closeAuditDetailButton" class="btn-auth" style="flex:1;">Close</button></div>
+          </div>
+        </div>
+
+        <div id="userModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
+          <div class="settings-modal user-modal">
+            <button class="settings-modal-close" id="closeUserModal" type="button" aria-label="Close">×</button>
+            <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+            <h3 id="userModalTitle" class="smodal-title">Add user</h3>
+            <p class="smodal-sub">Create a workspace account and choose its access role.</p>
+            <form id="userForm" class="smodal-form" autocomplete="off">
+              <input id="userId" type="hidden" />
+              <div class="user-form-grid">
+                <div class="smodal-field"><label for="userFirstName">First name</label><input id="userFirstName" maxlength="60" required /></div>
+                <div class="smodal-field"><label for="userLastName">Last name</label><input id="userLastName" maxlength="60" required /></div>
+              </div>
+              <div class="smodal-field"><label for="userEmail">Email</label><input id="userEmail" type="email" maxlength="120" required /></div>
+              <div class="user-form-grid">
+                <div class="smodal-field"><label for="userUsername">Username</label><input id="userUsername" maxlength="40" required autocomplete="off" /></div>
+                <div class="smodal-field"><label for="userRole">Role</label><select id="userRole"><option value="admin">Admin</option><option value="employee">Cashier</option></select></div>
+              </div>
+              <div class="smodal-field" id="userPasswordField"><label for="userPassword">Password</label><input id="userPassword" type="password" minlength="6" autocomplete="new-password" /></div>
+              <label class="user-active-toggle"><input id="userActive" type="checkbox" checked /> Active account</label>
+              <p id="userFormMessage" class="smodal-msg"></p>
+              <div class="smodal-actions"><button type="button" id="cancelUserModal" class="btn-outline">Cancel</button><button type="submit" class="btn-auth" id="saveUserButton" style="flex:1;">Add user</button></div>
+            </form>
           </div>
         </div>
 
@@ -257,7 +420,7 @@
           <span class="nav-label">Dashboard</span>
         </a>
 
-        <div class="nav-group">
+        <div class="nav-group" id="salesNavGroup">
           <button class="nav-item has-submenu">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
@@ -276,8 +439,8 @@
             <span class="nav-label">Sales</span>
           </button>
           <div class="nav-submenu dropup">
-            <a href="#">POS</a>
-            <a href="#">Return</a>
+            <a href="#sales-pos" data-sales-destination="pos">POS</a>
+            <a href="#sales-returns" data-sales-destination="returns">Return</a>
           </div>
         </div>
 
@@ -299,7 +462,7 @@
           </div>
         </div>
 
-        <a href="#" class="nav-item">
+        <a href="#suppliers" class="nav-item" id="navSuppliers">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -310,7 +473,7 @@
           <span class="nav-label">Suppliers</span>
         </a>
 
-        <a href="#" class="nav-item">
+        <a href="#audit-logs" class="nav-item" id="navAuditLogs">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -322,7 +485,7 @@
           <span class="nav-label">Audit Logs</span>
         </a>
 
-        <a href="#" class="nav-item">
+        <a href="#users" class="nav-item" id="navUsers">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
