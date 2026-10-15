@@ -18,13 +18,15 @@ enablePasswordToggles();
   }
 })();
 
-type Item = { sku: string; name: string; qty: number; slot: number };
+type Item = { sku: string; name: string; qty: number; slot: number; price?: number };
 type Log = { id: number; time: string; sku: string; type: 'IN' | 'OUT'; qty: number; note: string };
 type Move = 'IN' | 'OUT';
-type SaleLine = { sku: string; name: string; qty: number; returned: number };
-type Sale = { id: string; time: string; customer: string; reference: string; lines: SaleLine[] };
+type SaleLine = { sku: string; name: string; qty: number; returned: number; unitPrice?: number };
+type Sale = { id: string; time: string; customer: string; reference: string; lines: SaleLine[]; subtotal?: number; discountRate?: number; vat?: number; total?: number };
+type ReturnEntry = { id: string; saleId: string; sku: string; product: string; qty: number; reason: string; handledBy: string; status: 'Subject for review' | 'Reviewed'; time: string };
 type User = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean; password: string };
 type Supplier = { id: string; name: string; contactPerson: string; phone: string; email: string; address: string; active: boolean };
+type Category = { id: string; name: string };
 type AuditEntry = { id: string; createdAt: string; handledBy: string; module: string; action: string; description: string; ipAddress: string };
 
 const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
@@ -89,7 +91,17 @@ let users: User[] = readUsers([
 let items: Item[] = load('wh-items', seed);
 let logs: Log[] = load('wh-logs', []);
 let sales: Sale[] = load('wh-sales', []);
+let returnEntries: ReturnEntry[] = load('wh-returns', []);
 let suppliers: Supplier[] = load('wh-suppliers', []);
+let categories: Category[] = load('wh-categories', [
+  { id: 'category-tools', name: 'Tools' },
+  { id: 'category-constructions', name: 'Constructions' },
+  { id: 'category-plumbing', name: 'Plumbing' },
+  { id: 'category-electrical', name: 'Electrical' },
+  { id: 'category-fixtures', name: 'Fixtures' },
+  { id: 'category-others', name: 'Others' },
+  { id: 'category-computer-parts', name: 'Computer Parts' },
+]);
 const storedAuditEntries = load<unknown>('wh-audit-logs', []);
 let auditEntries: AuditEntry[] = Array.isArray(storedAuditEntries)
   ? storedAuditEntries.filter((entry): entry is AuditEntry => !!entry && typeof entry === 'object'
@@ -102,8 +114,10 @@ const save = () => {
   localStorage.setItem('wh-items', JSON.stringify(items));
   localStorage.setItem('wh-logs', JSON.stringify(logs));
   localStorage.setItem('wh-sales', JSON.stringify(sales));
+  localStorage.setItem('wh-returns', JSON.stringify(returnEntries));
   localStorage.setItem('wh-users', JSON.stringify(users));
   localStorage.setItem('wh-suppliers', JSON.stringify(suppliers));
+  localStorage.setItem('wh-categories', JSON.stringify(categories));
   localStorage.setItem('wh-audit-logs', JSON.stringify(auditEntries));
 };
 
@@ -122,7 +136,10 @@ function recordAudit(module: string, action: string, description: string, handle
 /* ---------- 3D scene ---------- */
 const host = $<HTMLDivElement>('#scene');
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio || 1, 2), 3));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 host.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -138,6 +155,15 @@ scene.background = new THREE.Color(0xeae7e3);
 scene.add(new THREE.HemisphereLight(0xffffff, 0xe8e5e0, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(5, 10, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -8;
+sun.shadow.camera.right = 8;
+sun.shadow.camera.top = 8;
+sun.shadow.camera.bottom = -8;
+sun.shadow.camera.near = 0.1;
+sun.shadow.camera.far = 30;
+sun.shadow.bias = -0.0002;
 scene.add(sun);
 const fill = new THREE.DirectionalLight(0xffffff, 0.4);
 fill.position.set(-5, 3, -6);
@@ -145,17 +171,29 @@ scene.add(fill);
 
 const floor = new THREE.GridHelper(16, 16, 0xc0bdb8, 0xd4d0cb);
 scene.add(floor);
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(30, 30),
+  new THREE.MeshStandardMaterial({ color: 0xeae7e3, roughness: 1, metalness: 0 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.12;
+ground.receiveShadow = true;
+scene.add(ground);
 
 const W = 1.2, GAP = 1.5;
 const rackMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.3 });
 for (let l = 0; l <= LEVELS; l++) {
   const plank = new THREE.Mesh(new THREE.BoxGeometry(COLS * W + 0.2, 0.1, W), rackMat);
   plank.position.y = l * GAP - 0.05;
+  plank.castShadow = true;
+  plank.receiveShadow = true;
   scene.add(plank);
 }
 for (const x of [-1, 1]) for (const z of [-1, 1]) {
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, LEVELS * GAP, 0.1), rackMat);
   post.position.set(x * (COLS * W) / 2, (LEVELS * GAP) / 2 - 0.05, z * (W / 2 - 0.05));
+  post.castShadow = true;
+  post.receiveShadow = true;
   scene.add(post);
 }
 
@@ -179,6 +217,8 @@ function syncBoxes() {
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue(it.sku), boxSaturation, boxLightness), roughness: 0.4, metalness: 0.3 });
       b = Object.assign(new THREE.Mesh(boxGeo, mat), { cur: 0.01, glow: 1 }) as Box;
       b.userData.sku = it.sku;
+      b.castShadow = true;
+      b.receiveShadow = true;
       scene.add(b);
       boxes.set(it.sku, b);
     }
@@ -245,13 +285,6 @@ function renderUI() {
 
   $('#skus').innerHTML = items.map((i) => `<option value="${esc(i.sku)}">${esc(i.name)}</option>`).join('');
 
-  $('#inv').innerHTML = items.length
-    ? `<thead><tr><th>SKU</th><th>Item</th><th>Slot</th><th style="text-align:right">Qty</th></tr></thead><tbody>` +
-      items.map((i) => `<tr class="pick" data-sku="${esc(i.sku)}"><td>${esc(i.sku)}</td><td>${esc(i.name)}</td>
-        <td>${'ABC'[Math.floor(i.slot / COLS)]}${(i.slot % COLS) + 1}</td>
-        <td class="num ${i.qty < LOW ? 'low' : ''}">${i.qty}</td></tr>`).join('') + '</tbody>'
-    : '<tbody><tr><td class="empty">No stock yet. Log a stock in to add your first SKU.</td></tr></tbody>';
-
   $('#log').innerHTML = logs.length
     ? `<thead><tr><th>Time</th><th>Type</th><th>SKU</th><th style="text-align:right">Qty</th><th>Note</th></tr></thead><tbody>` +
       logs.slice(0, 50).map((l) => `<tr><td>${l.time}</td><td><span class="tag ${l.type}">${l.type}</span></td>
@@ -261,6 +294,7 @@ function renderUI() {
   syncBoxes();
   renderSales();
   renderSuppliers();
+  renderCategories();
   renderUsers();
   renderAuditLogs();
 }
@@ -325,6 +359,27 @@ function renderSuppliers() {
     const from = visible.length ? (supplierPage - 1) * SUPPLIERS_PER_PAGE + 1 : 0;
     const to = Math.min(supplierPage * SUPPLIERS_PER_PAGE, visible.length);
     pagination.innerHTML = `<span class="users-pagination-summary">Showing ${from}–${to} of ${visible.length}</span><div class="users-pagination-actions"><button type="button" data-supplier-page="prev" ${supplierPage <= 1 ? 'disabled' : ''}>Previous</button><span>Page ${supplierPage} of ${pageCount}</span><button type="button" data-supplier-page="next" ${supplierPage >= pageCount ? 'disabled' : ''}>Next</button></div>`;
+  }
+}
+
+let categorySortDirection: 1 | -1 = 1;
+let categoryPage = 1;
+const CATEGORIES_PER_PAGE = 7;
+function renderCategories() {
+  const table = $('#categoriesTable');
+  if (!table) return;
+  const search = ($<HTMLInputElement>('#categorySearch')?.value ?? '').trim().toLowerCase();
+  const visible = categories.filter((category) => category.name.toLowerCase().includes(search));
+  if (categorySortDirection === -1) visible.reverse();
+  const pageCount = Math.max(1, Math.ceil(visible.length / CATEGORIES_PER_PAGE));
+  categoryPage = Math.min(categoryPage, pageCount);
+  const pageCategories = visible.slice((categoryPage - 1) * CATEGORIES_PER_PAGE, categoryPage * CATEGORIES_PER_PAGE);
+  table.innerHTML = pageCategories.length
+    ? `<thead><tr><th><button type="button" class="user-sort" data-category-sort>Name<span aria-hidden="true">${categorySortDirection === 1 ? '↕' : '↓'}</span></button></th><th class="user-actions-heading">Actions</th></tr></thead><tbody>${pageCategories.map((category) => `<tr><td>${esc(category.name)}</td><td class="user-actions"><button type="button" class="user-edit" data-edit-category="${esc(category.id)}" aria-label="Edit ${esc(category.name)}" title="Edit category"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 4 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z"/></svg></button><button type="button" class="user-delete" data-delete-category="${esc(category.id)}" aria-label="Delete ${esc(category.name)}" title="Delete category"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3"/></svg></button></td></tr>`).join('')}</tbody>`
+    : `<tbody><tr><td class="users-empty" colspan="2">${categories.length ? 'No categories match your search.' : 'No categories yet. Add a category to get started.'}</td></tr></tbody>`;
+  const pagination = $('#categoriesPagination');
+  if (pagination) {
+    pagination.innerHTML = `<div class="users-pagination-actions"><button type="button" data-category-page="prev" ${categoryPage <= 1 ? 'disabled' : ''}>Previous</button><button type="button" data-category-page="next" ${categoryPage >= pageCount ? 'disabled' : ''}>Next</button></div>`;
   }
 }
 
@@ -464,6 +519,55 @@ $<HTMLFormElement>('#supplierForm')?.addEventListener('submit', (event) => {
   const message = $('#suppliersMessage'); message.textContent = existing ? 'Supplier details saved.' : 'Supplier added successfully.'; message.className = 'users-message ok';
 });
 
+function openCategoryEditor(category?: Category) {
+  $<HTMLFormElement>('#categoryForm').reset();
+  $<HTMLInputElement>('#categoryId').value = category?.id ?? '';
+  $<HTMLInputElement>('#categoryName').value = category?.name ?? '';
+  $('#categoryModalTitle').textContent = category ? 'Edit category' : 'Add category';
+  $('#saveCategoryButton').textContent = category ? 'Save changes' : 'Add category';
+  setModalMsg('categoryFormMessage', '');
+  openModal('categoryModal');
+  setTimeout(() => $<HTMLInputElement>('#categoryName').focus(), 100);
+}
+
+$('#categorySearch')?.addEventListener('input', () => { categoryPage = 1; renderCategories(); });
+$('#addCategoryButton')?.addEventListener('click', () => openCategoryEditor());
+$('#closeCategoryModal')?.addEventListener('click', () => closeModal('categoryModal'));
+$('#cancelCategoryModal')?.addEventListener('click', () => closeModal('categoryModal'));
+$('#categoryModal')?.addEventListener('click', (event) => { if ((event.target as HTMLElement).id === 'categoryModal') closeModal('categoryModal'); });
+$('#categoriesTable')?.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement;
+  if (target.closest('[data-category-sort]')) { categorySortDirection = categorySortDirection === 1 ? -1 : 1; renderCategories(); return; }
+  const edit = target.closest<HTMLButtonElement>('[data-edit-category]');
+  if (edit) { const category = categories.find((entry) => entry.id === edit.dataset.editCategory); if (category) openCategoryEditor(category); return; }
+  const remove = target.closest<HTMLButtonElement>('[data-delete-category]');
+  if (!remove) return;
+  const category = categories.find((entry) => entry.id === remove.dataset.deleteCategory);
+  if (!category || !window.confirm(`Delete category “${category.name}”?`)) return;
+  categories = categories.filter((entry) => entry.id !== category.id);
+  recordAudit('Inventory', 'Category deleted', `${category.name} category deleted.`);
+  save(); renderCategories();
+});
+$('#categoriesPagination')?.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-category-page]');
+  if (!button || button.disabled) return;
+  categoryPage += button.dataset.categoryPage === 'next' ? 1 : -1;
+  renderCategories();
+});
+$<HTMLFormElement>('#categoryForm')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const id = $<HTMLInputElement>('#categoryId').value;
+  const name = $<HTMLInputElement>('#categoryName').value.trim();
+  const existing = categories.find((category) => category.id === id);
+  if (!name) return setModalMsg('categoryFormMessage', 'Enter a category name.');
+  if (categories.some((category) => category.id !== id && category.name.toLowerCase() === name.toLowerCase())) return setModalMsg('categoryFormMessage', 'That category already exists.');
+  const category: Category = { id: existing?.id ?? (crypto.randomUUID?.() ?? `category-${Date.now()}`), name };
+  categories = existing ? categories.map((entry) => entry.id === id ? category : entry) : [...categories, category];
+  recordAudit('Inventory', existing ? 'Category updated' : 'Category created', `${category.name} category ${existing ? 'updated' : 'created'}.`);
+  save(); categoryPage = 1; renderCategories(); closeModal('categoryModal');
+  const message = $('#categoriesMessage'); message.textContent = existing ? 'Category updated.' : 'Category added.'; message.className = 'users-message ok';
+});
+
 function openUserEditor(user?: User) {
   const form = $<HTMLFormElement>('#userForm');
   form.reset();
@@ -560,11 +664,6 @@ document.querySelectorAll<HTMLButtonElement>('.toggle button').forEach((btn) =>
     msg.textContent = '';
   }));
 
-$('#inv').addEventListener('click', (e) => {
-  const tr = (e.target as HTMLElement).closest<HTMLElement>('tr.pick');
-  if (tr) $<HTMLInputElement>('#sku').value = tr.dataset.sku!;
-});
-
 $<HTMLFormElement>('#form').addEventListener('submit', (e) => {
   e.preventDefault();
   const sku = $<HTMLInputElement>('#sku').value.trim().toUpperCase();
@@ -618,6 +717,7 @@ const setSalesMessage = (id: string, message: string, ok = false) => {
   const el = $<HTMLParagraphElement>(`#${id}`);
   if (el) { el.textContent = message; el.className = `sales-message${message ? (ok ? ' ok' : ' err') : ''}`; }
 };
+const currency = (amount: number) => `₱${amount.toFixed(2)}`;
 const cartUnits = () => Object.values(cart).reduce((sum, qty) => sum + qty, 0);
 
 function renderSales() {
@@ -629,14 +729,18 @@ function renderSales() {
   summary.innerHTML = `<div class="summary-metric"><strong>${orderCount}</strong><span>Orders recorded</span></div><div class="summary-metric"><strong>${unitsSold - unitsReturned}</strong><span>Net units sold</span></div>`;
 
   const search = ($<HTMLInputElement>('#productSearch')?.value ?? '').trim().toLowerCase();
-  const matches = items.filter((item) => `${item.sku} ${item.name}`.toLowerCase().includes(search));
+  const sortBy = $<HTMLSelectElement>('#productSort')?.value ?? 'name';
+  const matches = items.filter((item) => `${item.sku} ${item.name}`.toLowerCase().includes(search)).sort((a, b) =>
+    sortBy === 'sku' ? a.sku.localeCompare(b.sku) : sortBy === 'stock' ? b.qty - a.qty : a.name.localeCompare(b.name));
   const catalogCount = $('#catalogCount');
   if (catalogCount) catalogCount.textContent = `${matches.length} ${matches.length === 1 ? 'item' : 'items'}`;
   const catalog = $('#productCatalog');
   if (catalog) catalog.innerHTML = matches.length
     ? matches.map((item) => `<article class="product-card ${item.qty <= 0 ? 'unavailable' : ''}">
+        <span class="stock-badge ${item.qty <= 0 ? 'sold-out' : ''}">${item.qty <= 0 ? 'Sold out' : 'In stock'}</span>
         <div class="product-mark" aria-hidden="true">${esc(item.name.slice(0, 1).toUpperCase())}</div>
-        <div class="product-details"><span class="product-sku">${esc(item.sku)}</span><h3>${esc(item.name)}</h3><span class="stock-status ${item.qty < LOW ? 'stock-low' : ''}"><i></i>${item.qty} in stock</span></div>
+        <div class="product-details"><span class="product-sku">${esc(item.sku)}</span><h3>${esc(item.name)}</h3><span class="stock-status ${item.qty < LOW ? 'stock-low' : ''}"><i></i>${item.qty} units available</span></div>
+        <label class="product-price-label">Unit price<input class="product-price" type="number" min="0" step="0.01" value="${Number(item.price ?? 0).toFixed(2)}" data-price-sku="${esc(item.sku)}" aria-label="Unit price for ${esc(item.name)}" /></label>
         <button type="button" class="add-product" data-add-sku="${esc(item.sku)}" ${item.qty <= (cart[item.sku] ?? 0) ? 'disabled' : ''} aria-label="Add ${esc(item.name)} to order">+</button>
       </article>`).join('')
     : `<div class="sales-empty"><span class="empty-mark">⌕</span><strong>${items.length ? 'No matching products' : 'No inventory yet'}</strong><span>${items.length ? 'Try another name or SKU.' : 'Add stock from the dashboard to start a sale.'}</span></div>`;
@@ -644,11 +748,25 @@ function renderSales() {
   const lines = Object.entries(cart).map(([sku, qty]) => ({ item: items.find((item) => item.sku === sku), qty })).filter((line) => line.item);
   const cartLines = $('#cartLines');
   if (cartLines) cartLines.innerHTML = lines.length
-    ? lines.map(({ item, qty }) => `<div class="cart-line" data-cart-line="${esc(item!.sku)}"><div class="cart-line-copy"><strong>${esc(item!.name)}</strong><span>${esc(item!.sku)} · ${item!.qty} available</span></div><div class="quantity-control"><button type="button" data-cart-action="minus" data-cart-sku="${esc(item!.sku)}" aria-label="Remove one ${esc(item!.name)}">−</button><span>${qty}</span><button type="button" data-cart-action="plus" data-cart-sku="${esc(item!.sku)}" aria-label="Add one ${esc(item!.name)}" ${qty >= item!.qty ? 'disabled' : ''}>+</button></div><button type="button" class="remove-line" data-cart-action="remove" data-cart-sku="${esc(item!.sku)}" aria-label="Remove ${esc(item!.name)} from order">×</button></div>`).join('')
+    ? lines.map(({ item, qty }) => `<div class="cart-line" data-cart-line="${esc(item!.sku)}"><div class="cart-line-copy"><strong>${esc(item!.name)}</strong><span>${esc(item!.sku)}</span></div><div class="quantity-control"><button type="button" data-cart-action="minus" data-cart-sku="${esc(item!.sku)}" aria-label="Remove one ${esc(item!.name)}">−</button><span>${qty}</span><button type="button" data-cart-action="plus" data-cart-sku="${esc(item!.sku)}" aria-label="Add one ${esc(item!.name)}" ${qty >= item!.qty ? 'disabled' : ''}>+</button></div><label class="sr-only" for="cart-price-${esc(item!.sku)}">Unit price for ${esc(item!.name)}</label><input id="cart-price-${esc(item!.sku)}" class="cart-price" type="number" min="0" step="0.01" value="${Number(item!.price ?? 0).toFixed(2)}" data-price-sku="${esc(item!.sku)}" /><strong class="cart-line-total">${currency(Number(item!.price ?? 0) * qty)}</strong><button type="button" class="remove-line" data-cart-action="remove" data-cart-sku="${esc(item!.sku)}" aria-label="Remove ${esc(item!.name)} from order">×</button></div>`).join('')
     : `<div class="cart-empty"><div class="cart-empty-icon">＋</div><strong>Your order is empty</strong><span>Add products from the catalog to get started.</span></div>`;
   const itemCount = $('#cartItemCount'); if (itemCount) itemCount.textContent = `${lines.length}`;
   const unitCount = $('#cartUnitCount'); if (unitCount) unitCount.textContent = `${cartUnits()}`;
-  const checkout = $<HTMLButtonElement>('#completeSale'); if (checkout) checkout.disabled = !lines.length;
+  const subtotal = lines.reduce((sum, { item, qty }) => sum + Number(item!.price ?? 0) * qty, 0);
+  const discountInput = $<HTMLInputElement>('#discountRate');
+  const discountRate = Math.max(0, Math.min(100, Number(discountInput?.value ?? 0) || 0));
+  if (discountInput && Number(discountInput.value) !== discountRate) discountInput.value = `${discountRate}`;
+  const discount = subtotal * discountRate / 100;
+  const vat = (subtotal - discount) * 0.12;
+  const total = subtotal - discount + vat;
+  const subtotalNode = $('#cartSubtotal'); if (subtotalNode) subtotalNode.textContent = currency(subtotal);
+  const discountNode = $('#cartDiscount'); if (discountNode) discountNode.textContent = currency(discount);
+  const vatNode = $('#cartVat'); if (vatNode) vatNode.textContent = currency(vat);
+  const totalNode = $('#cartTotal'); if (totalNode) totalNode.textContent = currency(total);
+  const checkout = $<HTMLButtonElement>('#completeSale'); if (checkout) checkout.disabled = !lines.length || lines.some(({ item }) => !(Number(item!.price) > 0));
+  const priceMissing = lines.some(({ item }) => !(Number(item!.price) > 0));
+  if (priceMissing) setSalesMessage('saleMessage', 'Set a unit price for each product before payment.');
+  else if ($('#saleMessage')?.textContent === 'Set a unit price for each product before payment.') setSalesMessage('saleMessage', '');
 
   const returnSearch = ($<HTMLInputElement>('#returnSearch')?.value ?? '').trim().toLowerCase();
   const visibleSales = sales.filter((sale) => `${sale.id} ${sale.customer} ${sale.reference} ${sale.lines.map((line) => `${line.sku} ${line.name}`).join(' ')}`.toLowerCase().includes(returnSearch));
@@ -657,9 +775,14 @@ function renderSales() {
   if (history) history.innerHTML = visibleSales.length
     ? visibleSales.map((sale) => `<article class="sale-record"><div class="sale-record-head"><div><span class="sale-order-id">${esc(sale.reference || sale.id)}</span><span class="sale-customer">${esc(sale.customer || 'Walk-in customer')}</span></div><time>${esc(moneylessDate(sale.time))}</time></div><div class="return-lines">${sale.lines.map((line) => {
       const remaining = line.qty - line.returned;
-      return `<div class="return-line"><div><strong>${esc(line.name)}</strong><span>${esc(line.sku)} · ${line.returned} of ${line.qty} already returned</span></div>${remaining > 0 ? `<div class="return-action"><label class="sr-only" for="ret-${esc(sale.id)}-${esc(line.sku)}">Return quantity for ${esc(line.name)}</label><input id="ret-${esc(sale.id)}-${esc(line.sku)}" class="return-qty" type="number" min="1" max="${remaining}" value="1" data-return-sale="${esc(sale.id)}" data-return-sku="${esc(line.sku)}" /><button type="button" class="return-button" data-return-sale="${esc(sale.id)}" data-return-sku="${esc(line.sku)}">Restock</button></div>` : `<span class="returned-label">FULLY RETURNED</span>`}</div>`;
+      return `<div class="return-line"><div><strong>${esc(line.name)}</strong><span>${esc(line.sku)} · ${line.returned} of ${line.qty} already returned</span></div>${remaining > 0 ? `<div class="return-action"><label class="sr-only" for="ret-${esc(sale.id)}-${esc(line.sku)}">Return quantity for ${esc(line.name)}</label><input id="ret-${esc(sale.id)}-${esc(line.sku)}" class="return-qty" type="number" min="1" max="${remaining}" value="1" data-return-sale="${esc(sale.id)}" data-return-sku="${esc(line.sku)}" /><label class="sr-only" for="reason-${esc(sale.id)}-${esc(line.sku)}">Return reason</label><input id="reason-${esc(sale.id)}-${esc(line.sku)}" class="return-reason" maxlength="120" placeholder="Reason" data-return-reason="${esc(sale.id)}-${esc(line.sku)}" /><button type="button" class="return-button" data-return-sale="${esc(sale.id)}" data-return-sku="${esc(line.sku)}">Return item</button></div>` : `<span class="returned-label">FULLY RETURNED</span>`}</div>`;
     }).join('')}</div></article>`).join('')
     : `<div class="sales-empty"><span class="empty-mark">↩</span><strong>${sales.length ? 'No matching orders' : 'No completed sales yet'}</strong><span>${sales.length ? 'Try another order, customer or SKU.' : 'Completed POS orders will appear here for returns.'}</span></div>`;
+
+  const returnRegister = $('#returnRegister');
+  if (returnRegister) returnRegister.innerHTML = returnEntries.length
+    ? `<thead><tr><th>Date</th><th>Returned product</th><th>Qty</th><th>Reason</th><th>Handled by</th><th>Status</th><th>Action</th></tr></thead><tbody>${returnEntries.slice().sort((a, b) => b.time.localeCompare(a.time)).map((entry) => `<tr><td>${esc(moneylessDate(entry.time))}</td><td>${esc(entry.product)}</td><td class="num">${entry.qty}</td><td>${esc(entry.reason)}</td><td>${esc(entry.handledBy)}</td><td><span class="return-status ${entry.status === 'Reviewed' ? 'reviewed' : ''}">${esc(entry.status)}</span></td><td>${entry.status === 'Reviewed' ? '—' : `<button type="button" class="review-return" data-review-return="${esc(entry.id)}">Mark reviewed</button>`}</td></tr>`).join('')}</tbody>`
+    : `<tbody><tr><td class="sales-table-empty" colspan="7">No returned items have been recorded yet.</td></tr></tbody>`;
 
   const recent = $('#recentSales');
   if (recent) recent.innerHTML = sales.length
@@ -677,7 +800,7 @@ function showSalesView(mode: 'pos' | 'returns') {
   if (returnsPanel) returnsPanel.style.display = mode === 'returns' ? '' : 'none';
   if (recentPanel) recentPanel.style.display = mode === 'pos' ? '' : 'none';
   const title = $('#salesPageTitle'); if (title) title.textContent = mode === 'pos' ? 'Point of sale' : 'Sales returns';
-  const lead = document.querySelector<HTMLElement>('.sales-lead'); if (lead) lead.textContent = mode === 'pos' ? 'Build an order from available stock and record every dispatch.' : 'Find an order and return eligible items to available stock.';
+  const lead = salesView?.querySelector<HTMLElement>('.sales-lead'); if (lead) lead.textContent = mode === 'pos' ? 'Build an order from available stock and record every dispatch.' : 'Find a completed sale and record returned items for restocking.';
   document.querySelectorAll<HTMLButtonElement>('.sales-tab').forEach((tab) => {
     const active = tab.dataset.salesView === mode;
     tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active));
@@ -686,7 +809,19 @@ function showSalesView(mode: 'pos' | 'returns') {
 }
 
 $('#productSearch')?.addEventListener('input', renderSales);
+$('#productSort')?.addEventListener('change', renderSales);
 $('#returnSearch')?.addEventListener('input', renderSales);
+$('#discountRate')?.addEventListener('input', renderSales);
+document.addEventListener('change', (event) => {
+  const input = (event.target as HTMLElement).closest<HTMLInputElement>('[data-price-sku]');
+  if (!input) return;
+  const item = items.find((entry) => entry.sku === input.dataset.priceSku);
+  const price = Number(input.value);
+  if (!item || !Number.isFinite(price) || price < 0) return;
+  item.price = price;
+  save();
+  renderSales();
+});
 $('#productCatalog')?.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-add-sku]');
   if (!button) return;
@@ -702,6 +837,7 @@ $('#cartLines')?.addEventListener('click', (event) => {
   else if (action === 'plus' && item && (cart[sku] ?? 0) < item.qty) cart[sku] = (cart[sku] ?? 0) + 1;
   renderSales();
 });
+$('#clearCart')?.addEventListener('click', () => { cart = {}; setSalesMessage('saleMessage', ''); renderSales(); });
 $<HTMLButtonElement>('#completeSale')?.addEventListener('click', () => {
   const lines = Object.entries(cart).map(([sku, qty]) => ({ item: items.find((entry) => entry.sku === sku), qty }));
   const unavailable = lines.find(({ item, qty }) => !item || qty > item.qty);
@@ -711,7 +847,13 @@ $<HTMLButtonElement>('#completeSale')?.addEventListener('click', () => {
   const time = new Date().toISOString();
   const customer = $<HTMLInputElement>('#saleCustomer').value.trim();
   const reference = $<HTMLInputElement>('#saleReference').value.trim();
-  const sale: Sale = { id: saleId, time, customer, reference, lines: lines.map(({ item, qty }) => ({ sku: item!.sku, name: item!.name, qty, returned: 0 })) };
+  const discountRate = Math.max(0, Math.min(100, Number($<HTMLInputElement>('#discountRate').value) || 0));
+  const subtotal = lines.reduce((sum, { item, qty }) => sum + Number(item!.price ?? 0) * qty, 0);
+  const discount = subtotal * discountRate / 100;
+  const vat = (subtotal - discount) * 0.12;
+  const total = subtotal - discount + vat;
+  if (lines.some(({ item }) => !(Number(item!.price) > 0))) { setSalesMessage('saleMessage', 'Set a unit price for each product before payment.'); return; }
+  const sale: Sale = { id: saleId, time, customer, reference, subtotal, discountRate, vat, total, lines: lines.map(({ item, qty }) => ({ sku: item!.sku, name: item!.name, qty, returned: 0, unitPrice: Number(item!.price ?? 0) })) };
   for (const line of sale.lines) {
     const item = items.find((entry) => entry.sku === line.sku)!;
     item.qty -= line.qty;
@@ -720,7 +862,7 @@ $<HTMLButtonElement>('#completeSale')?.addEventListener('click', () => {
   sales.unshift(sale);
   recordAudit('Sales', 'Sale completed', `Order ${reference || saleId} completed with ${sale.lines.length} line item${sale.lines.length === 1 ? '' : 's'}.`);
   cart = {}; save(); renderUI();
-  $<HTMLInputElement>('#saleCustomer').value = ''; $<HTMLInputElement>('#saleReference').value = '';
+  $<HTMLInputElement>('#saleCustomer').value = ''; $<HTMLInputElement>('#saleReference').value = ''; $<HTMLInputElement>('#discountRate').value = '0';
   setSalesMessage('saleMessage', `Sale ${reference || saleId} completed. Inventory has been updated.`, true);
 });
 $('#salesHistory')?.addEventListener('click', (event) => {
@@ -729,15 +871,28 @@ $('#salesHistory')?.addEventListener('click', (event) => {
   const sale = sales.find((entry) => entry.id === button.dataset.returnSale);
   const line = sale?.lines.find((entry) => entry.sku === button.dataset.returnSku);
   const input = button.parentElement?.querySelector<HTMLInputElement>('.return-qty');
+  const reasonInput = button.parentElement?.querySelector<HTMLInputElement>('.return-reason');
   const qty = Math.floor(Number(input?.value));
+  const reason = reasonInput?.value.trim() ?? '';
   if (!sale || !line || !(qty > 0) || qty > line.qty - line.returned) { setSalesMessage('returnMessage', 'Enter a return quantity within the remaining order quantity.'); return; }
-  line.returned += qty;
+  if (!reason) { setSalesMessage('returnMessage', 'Enter a reason for the return.'); reasonInput?.focus(); return; }
   const item = items.find((entry) => entry.sku === line.sku);
-  if (item) item.qty += qty;
+  if (!item) { setSalesMessage('returnMessage', 'This product is no longer in inventory and cannot be restocked.'); return; }
+  line.returned += qty;
+  item.qty += qty;
+  returnEntries.unshift({ id: `RET-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, saleId: sale.id, sku: line.sku, product: line.name, qty, reason, handledBy: getSession()?.username ?? 'Unknown', status: 'Subject for review', time: new Date().toISOString() });
   logs.unshift({ id: Date.now(), time: new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }), sku: line.sku, type: 'IN', qty, note: `Return ${sale.reference || sale.id}` });
   recordAudit('Sales', 'Return restocked', `${qty} × ${line.name} returned for order ${sale.reference || sale.id}.`);
   save(); renderUI();
   setSalesMessage('returnMessage', `${qty} × ${line.name} restocked from ${sale.reference || sale.id}.`, true);
+});
+$('#returnRegister')?.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-review-return]');
+  if (!button) return;
+  const entry = returnEntries.find((record) => record.id === button.dataset.reviewReturn);
+  if (!entry) return;
+  entry.status = 'Reviewed';
+  save(); renderSales();
 });
 document.querySelectorAll<HTMLButtonElement>('.sales-tab').forEach((tab) => tab.addEventListener('click', () => showSalesView(tab.dataset.salesView as 'pos' | 'returns')));
 $('#viewAllReturns')?.addEventListener('click', () => { showSalesView('returns'); switchView('sales'); });
@@ -776,13 +931,17 @@ document.querySelectorAll<HTMLButtonElement>('.nav-item.has-submenu').forEach((b
     document.querySelectorAll('.nav-submenu.open').forEach(openSub => {
       if (openSub !== submenu) {
         openSub.classList.remove('open');
-        openSub.closest('.nav-group')?.classList.remove('open');
+        const openGroup = openSub.closest('.nav-group');
+        openGroup?.classList.remove('open');
+        openGroup?.querySelector<HTMLButtonElement>('.nav-item.has-submenu')?.setAttribute('aria-expanded', 'false');
       }
     });
 
     if (group && submenu) {
-      group.classList.toggle('open');
-      submenu.classList.toggle('open');
+      const isOpen = !submenu.classList.contains('open');
+      group.classList.toggle('open', isOpen);
+      submenu.classList.toggle('open', isOpen);
+      btn.setAttribute('aria-expanded', String(isOpen));
     }
   });
 });
@@ -793,16 +952,20 @@ document.addEventListener('click', (e) => {
   if (!target.closest('.nav-group')) {
     document.querySelectorAll('.nav-submenu.open').forEach(openSub => {
       openSub.classList.remove('open');
-      openSub.closest('.nav-group')?.classList.remove('open');
+      const openGroup = openSub.closest('.nav-group');
+      openGroup?.classList.remove('open');
+      openGroup?.querySelector<HTMLButtonElement>('.nav-item.has-submenu')?.setAttribute('aria-expanded', 'false');
     });
   }
 });
 
 /* ---------- Navigation & Views ---------- */
 const dashboardView = $('#dashboardView');
+const movementView = $('#movementView');
 const settingsView = $('#settingsView');
 const salesView = $('#salesView');
 const suppliersView = $('#suppliersView');
+const categoriesView = $('#categoriesView');
 const auditLogsView = $('#auditLogsView');
 const usersView = $('#usersView');
 const navDashboard = $('#navDashboard');
@@ -811,13 +974,16 @@ const navSuppliers = $('#navSuppliers');
 const navAuditLogs = $('#navAuditLogs');
 const navUsers = $('#navUsers');
 const salesNavGroup = $('#salesNavGroup');
+const inventoryNavGroup = $('#inventoryNavGroup');
 
-function switchView(view: 'dashboard' | 'settings' | 'sales' | 'suppliers' | 'auditLogs' | 'users') {
-  if (!dashboardView || !settingsView || !salesView || !suppliersView || !auditLogsView || !usersView || !navDashboard || !navSettings) return;
+function switchView(view: 'dashboard' | 'movement' | 'categories' | 'settings' | 'sales' | 'suppliers' | 'auditLogs' | 'users') {
+  if (!dashboardView || !movementView || !settingsView || !salesView || !suppliersView || !categoriesView || !auditLogsView || !usersView || !navDashboard || !navSettings) return;
   dashboardView.style.display = view === 'dashboard' ? '' : 'none';
+  movementView.style.display = view === 'movement' ? '' : 'none';
   settingsView.style.display = view === 'settings' ? 'block' : 'none';
   salesView.style.display = view === 'sales' ? '' : 'none';
   suppliersView.style.display = view === 'suppliers' ? '' : 'none';
+  categoriesView.style.display = view === 'categories' ? '' : 'none';
   auditLogsView.style.display = view === 'auditLogs' ? '' : 'none';
   usersView.style.display = view === 'users' ? '' : 'none';
   navDashboard.classList.toggle('active', view === 'dashboard');
@@ -826,6 +992,7 @@ function switchView(view: 'dashboard' | 'settings' | 'sales' | 'suppliers' | 'au
   navAuditLogs?.classList.toggle('active', view === 'auditLogs');
   navUsers?.classList.toggle('active', view === 'users');
   salesNavGroup?.classList.toggle('active', view === 'sales');
+  inventoryNavGroup?.classList.toggle('active', view === 'movement' || view === 'categories');
   
   if (view === 'settings') {
     // Populate username + role
@@ -880,6 +1047,10 @@ function switchView(view: 'dashboard' | 'settings' | 'sales' | 'suppliers' | 'au
     if (window.location.hash !== hash) window.location.hash = hash;
   } else if (view === 'users') {
     if (window.location.hash !== '#users') window.location.hash = '#users';
+  } else if (view === 'categories') {
+    if (window.location.hash !== '#categories') window.location.hash = '#categories';
+  } else if (view === 'movement') {
+    if (window.location.hash !== '#movement') window.location.hash = '#movement';
   } else if (view === 'suppliers') {
     if (window.location.hash !== '#suppliers') window.location.hash = '#suppliers';
   } else if (view === 'auditLogs') {
@@ -920,7 +1091,20 @@ document.querySelectorAll<HTMLAnchorElement>('[data-sales-destination]').forEach
   showSalesView(link.dataset.salesDestination as 'pos' | 'returns');
   switchView('sales');
   link.closest('.nav-submenu')?.classList.remove('open');
-  link.closest('.nav-group')?.classList.remove('open');
+  const group = link.closest('.nav-group');
+  group?.classList.remove('open');
+  group?.querySelector<HTMLButtonElement>('.nav-item.has-submenu')?.setAttribute('aria-expanded', 'false');
+}));
+
+document.querySelectorAll<HTMLAnchorElement>('[data-inventory-destination]').forEach((link) => link.addEventListener('click', (event) => {
+  event.preventDefault();
+  const destination = link.dataset.inventoryDestination;
+  switchView(destination === 'categories' ? 'categories' : 'movement');
+  if (destination === 'products') $<HTMLInputElement>('#sku')?.focus();
+  const group = link.closest('.nav-group');
+  group?.classList.remove('open');
+  group?.querySelector('.nav-submenu')?.classList.remove('open');
+  group?.querySelector<HTMLButtonElement>('.nav-item.has-submenu')?.setAttribute('aria-expanded', 'false');
 }));
 
 
@@ -936,6 +1120,10 @@ function checkInitialHash() {
     switchView('settings');
   } else if (window.location.hash === '#users') {
     switchView('users');
+  } else if (window.location.hash === '#categories') {
+    switchView('categories');
+  } else if (window.location.hash === '#movement') {
+    switchView('movement');
   } else if (window.location.hash === '#suppliers') {
     switchView('suppliers');
   } else if (window.location.hash === '#audit-logs') {

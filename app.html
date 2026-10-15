@@ -55,54 +55,55 @@
             </div>
           </header>
 
-          <main>
-            <aside class="sidebar">
-              <section class="panel tilt">
-                <h2>Log a movement</h2>
-                <form id="form" autocomplete="off">
-                  <div class="toggle" role="group" aria-label="Movement type">
-                    <button type="button" class="in active" data-type="IN">Stock in</button>
-                    <button type="button" class="out" data-type="OUT">Stock out</button>
-                  </div>
-                  <label>SKU
-                    <input id="sku" list="skus" placeholder="e.g. BLT-001" required />
-                    <datalist id="skus"></datalist>
-                  </label>
-                  <label id="nameRow">Item name (new SKUs)
-                    <input id="name" placeholder="e.g. Hex bolts M8" />
-                  </label>
-                  <label>Quantity
-                    <input id="qty" type="number" min="1" step="1" value="1" required />
-                  </label>
-                  <label>Note
-                    <input id="note" placeholder="PO number, order ID, reason…" />
-                  </label>
-                  <button class="submit" type="submit">Save stock in</button>
-                  <p id="msg" class="msg" role="status"></p>
-                </form>
-              </section>
+          <main class="dashboard-main">
+            <section class="panel scene-wrap">
+              <div id="scene"></div>
+              <div id="tip" class="tip"></div>
+              <p class="hint">Drag to orbit · scroll to zoom</p>
+            </section>
 
-              <section class="panel tilt">
-                <h2>Inventory</h2>
-                <div class="scroll">
-                  <table id="inv"></table>
-                </div>
-              </section>
-
-              <section class="panel tilt">
+            <div class="dashboard-data-grid">
+              <section class="panel">
                 <h2>Movement log</h2>
                 <div class="scroll">
                   <table id="log"></table>
                 </div>
               </section>
-            </aside>
-
-            <section class="panel scene-wrap">
-              <div id="scene"></div>
-              <div id="tip" class="tip"></div>
-              <p class="hint">Drag to orbit · scroll to zoom · click a box to select</p>
-            </section>
+            </div>
           </main>
+        </div>
+
+        <div id="movementView" style="display: none;">
+          <header class="movement-header">
+            <div>
+              <p class="eyebrow">WAREHOUSE / INVENTORY</p>
+              <h1>Log a movement</h1>
+              <p class="sales-lead">Record stock entering or leaving your warehouse.</p>
+            </div>
+          </header>
+          <section class="panel movement-panel">
+            <form id="form" autocomplete="off">
+              <div class="toggle" role="group" aria-label="Movement type">
+                <button type="button" class="in active" data-type="IN">Stock in</button>
+                <button type="button" class="out" data-type="OUT">Stock out</button>
+              </div>
+              <label>SKU
+                <input id="sku" list="skus" placeholder="e.g. BLT-001" required />
+                <datalist id="skus"></datalist>
+              </label>
+              <label id="nameRow">Item name (new SKUs)
+                <input id="name" placeholder="e.g. Hex bolts M8" />
+              </label>
+              <label>Quantity
+                <input id="qty" type="number" min="1" step="1" value="1" required />
+              </label>
+              <label>Note
+                <input id="note" placeholder="PO number, order ID, reason…" />
+              </label>
+              <button class="submit" type="submit">Save stock in</button>
+              <p id="msg" class="msg" role="status"></p>
+            </form>
+          </section>
         </div>
 
         <div id="salesView" style="display: none;">
@@ -128,27 +129,31 @@
               </div>
               <label class="search-field" for="productSearch">
                 <span aria-hidden="true">⌕</span>
-                <input id="productSearch" type="search" placeholder="Search by item name or SKU" autocomplete="off" />
+                <input id="productSearch" type="search" placeholder="Search products" autocomplete="off" />
+                <select id="productSort" aria-label="Sort products">
+                  <option value="name">Name (A–Z)</option>
+                  <option value="sku">SKU</option>
+                  <option value="stock">Stock</option>
+                </select>
               </label>
               <div id="productCatalog" class="product-catalog"></div>
             </div>
 
             <aside class="cart-panel panel">
               <div class="section-heading">
-                <div><p class="eyebrow">CURRENT ORDER</p><h2>Sales cart</h2></div>
-                <span class="order-badge">DRAFT</span>
+                <div><p class="eyebrow">CURRENT ORDER</p><h2>Payment</h2></div>
+                <button class="text-action" id="clearCart" type="button">Clear items</button>
               </div>
-              <label class="sales-field">Customer / account
-                <input id="saleCustomer" maxlength="80" placeholder="Walk-in customer" />
-              </label>
-              <label class="sales-field">Order reference <span class="optional">OPTIONAL</span>
-                <input id="saleReference" maxlength="60" placeholder="e.g. SO-1048" />
-              </label>
+              <div class="cart-table-head" aria-hidden="true"><span>Item</span><span>Qty</span><span>Price</span><span>Subtotal</span></div>
               <div class="cart-lines" id="cartLines" aria-live="polite"></div>
               <div class="cart-footer">
-                <div class="cart-total-row"><span>Line items</span><strong id="cartItemCount">0</strong></div>
-                <div class="cart-total-row"><span>Total units</span><strong id="cartUnitCount">0</strong></div>
-                <button class="checkout-button" id="completeSale" type="button" disabled>Complete sale <span aria-hidden="true">→</span></button>
+                <label class="sales-field">Customer / account<input id="saleCustomer" maxlength="80" placeholder="Walk-in customer" /></label>
+                <label class="sales-field">Order reference<input id="saleReference" maxlength="60" placeholder="Optional reference" /></label>
+                <div class="cart-total-row"><span>Subtotal</span><strong id="cartSubtotal">₱0.00</strong></div>
+                <label class="cart-total-row discount-row"><span>Discount</span><input id="discountRate" type="number" min="0" max="100" step="1" value="0" aria-label="Discount percentage" /><strong id="cartDiscount">₱0.00</strong></label>
+                <div class="cart-total-row"><span>VAT (12%)</span><strong id="cartVat">₱0.00</strong></div>
+                <div class="cart-total-row due-row"><span>Due amount</span><strong id="cartTotal">₱0.00</strong></div>
+                <button class="checkout-button" id="completeSale" type="button" disabled>Proceed to pay</button>
                 <p id="saleMessage" class="sales-message" role="status"></p>
               </div>
             </aside>
@@ -161,6 +166,10 @@
             </div>
             <label class="search-field return-search" for="returnSearch"><span aria-hidden="true">⌕</span><input id="returnSearch" type="search" placeholder="Search order, customer or SKU" autocomplete="off" /></label>
             <div id="salesHistory" class="sales-history"></div>
+            <div class="return-register-wrap">
+              <h3>Return register</h3>
+              <div class="sales-table-wrap"><table class="sales-table return-register" id="returnRegister"></table></div>
+            </div>
             <p id="returnMessage" class="sales-message" role="status"></p>
           </section>
 
@@ -180,6 +189,19 @@
             <div class="users-table-wrap suppliers-table-wrap"><table class="users-table suppliers-table" id="suppliersTable"></table></div>
             <div class="users-pagination" id="suppliersPagination" aria-label="Supplier list pages"></div>
             <p id="suppliersMessage" class="users-message" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+
+        <div id="categoriesView" style="display: none;">
+          <header class="users-header categories-header">
+            <div class="users-title"><span class="users-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg></span><h1>Categories</h1></div>
+            <button type="button" class="users-add-button" id="addCategoryButton"><span aria-hidden="true">＋</span> Add category</button>
+          </header>
+          <section class="users-panel categories-panel">
+            <label class="users-search" for="categorySearch"><span aria-hidden="true">⌕</span><input id="categorySearch" type="search" placeholder="Filter by category..." autocomplete="off" /></label>
+            <div class="users-table-wrap categories-table-wrap"><table class="users-table categories-table" id="categoriesTable"></table></div>
+            <div class="users-pagination" id="categoriesPagination" aria-label="Category list pages"></div>
+            <p id="categoriesMessage" class="users-message" role="status" aria-live="polite"></p>
           </section>
         </div>
 
@@ -289,6 +311,21 @@
               <label class="user-active-toggle"><input id="supplierActive" type="checkbox" checked /> Active supplier</label>
               <p id="supplierFormMessage" class="smodal-msg"></p>
               <div class="smodal-actions"><button type="button" id="cancelSupplierModal" class="btn-outline">Cancel</button><button type="submit" class="btn-auth" id="saveSupplierButton" style="flex:1;">Add supplier</button></div>
+            </form>
+          </div>
+        </div>
+
+        <div id="categoryModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
+          <div class="settings-modal category-modal">
+            <button class="settings-modal-close" id="closeCategoryModal" type="button" aria-label="Close">×</button>
+            <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg></div>
+            <h3 id="categoryModalTitle" class="smodal-title">Add category</h3>
+            <p class="smodal-sub">Organize the products in your inventory.</p>
+            <form id="categoryForm" class="smodal-form" autocomplete="off">
+              <input id="categoryId" type="hidden" />
+              <div class="smodal-field"><label for="categoryName">Category name</label><input id="categoryName" maxlength="60" required placeholder="e.g. Tools" /></div>
+              <p id="categoryFormMessage" class="smodal-msg"></p>
+              <div class="smodal-actions"><button type="button" id="cancelCategoryModal" class="btn-outline">Cancel</button><button type="submit" class="btn-auth" id="saveCategoryButton" style="flex:1;">Add category</button></div>
             </form>
           </div>
         </div>
@@ -420,8 +457,8 @@
           <span class="nav-label">Dashboard</span>
         </a>
 
-        <div class="nav-group" id="salesNavGroup">
-          <button class="nav-item has-submenu">
+        <div class="nav-group sales-nav-group" id="salesNavGroup">
+          <button class="nav-item has-submenu" aria-expanded="false" aria-controls="salesSubmenu">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
               <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
@@ -437,14 +474,15 @@
               <line x1="8" y1="18" x2="8.01" y2="18" />
             </svg>
             <span class="nav-label">Sales</span>
+           
           </button>
-          <div class="nav-submenu dropup">
+          <div class="nav-submenu" id="salesSubmenu">
             <a href="#sales-pos" data-sales-destination="pos">POS</a>
             <a href="#sales-returns" data-sales-destination="returns">Return</a>
           </div>
         </div>
 
-        <div class="nav-group">
+        <div class="nav-group" id="inventoryNavGroup">
           <button class="nav-item has-submenu">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
@@ -457,8 +495,8 @@
             <span class="nav-label">Inventory</span>
           </button>
           <div class="nav-submenu dropup">
-            <a href="#">Categories</a>
-            <a href="#">Products</a>
+            <a href="#categories" data-inventory-destination="categories">Categories</a>
+            <a href="#movement" data-inventory-destination="products">Products</a>
           </div>
         </div>
 
