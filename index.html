@@ -549,11 +549,11 @@
       </div>
       
       <h2 id="resetModalTitle" class="reset-title">Reset Password</h2>
-      <p class="reset-desc">Your password will be reset to the <strong>default</strong>. Enter your username to confirm.</p>
+      <p class="reset-desc">Enter your registered email address. We'll send you a link to reset your password.</p>
 
       <!-- Step 1 -->
       <div id="resetStep1">
-        <input type="text" id="resetUsername" class="reset-input" placeholder="Enter your username" autocomplete="off" />
+        <input type="email" id="resetUsername" class="reset-input" placeholder="Enter your registered email" autocomplete="email" />
         <p id="resetMsg" class="reset-msg" role="status"></p>
         <div class="reset-actions">
           <button type="button" id="cancelResetModal" class="reset-btn-cancel">Cancel</button>
@@ -566,8 +566,8 @@
         <div class="reset-success-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-        <p class="reset-success-text">Password reset successfully!</p>
-        <p id="resetSuccessInfo" class="reset-success-info"></p>
+        <p class="reset-success-text">Check your email</p>
+        <p id="resetSuccessInfo" class="reset-success-info">If an account matches that email, you'll receive a password recovery link.</p>
         <button type="button" id="closeResetSuccess" class="reset-btn-done">Got it</button>
       </div>
     </div>

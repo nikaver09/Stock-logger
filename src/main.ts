@@ -2,28 +2,75 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { enablePasswordToggles } from './password-toggle';
 import './style.css';
+import { supabase } from './supabase';
 
 enablePasswordToggles();
 
+
 /* ---------- auth guard ---------- */
-(function checkAuth() {
+(async function checkAuth() {
   try {
-    let session = JSON.parse(localStorage.getItem('wh-session') ?? 'null');
-    if (!session?.username) {
-      session = { username: 'admin', role: 'admin' };
-      localStorage.setItem('wh-session', JSON.stringify(session));
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error || !data.session) {
+      localStorage.removeItem('wh-session');
+      window.location.replace('/');
+      return;
     }
-  } catch {
-    localStorage.setItem('wh-session', JSON.stringify({ username: 'admin', role: 'admin' }));
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('username, role, active')
+      .eq('id', data.session.user.id)
+      .single();
+
+    if (profileError || !profile || !profile.active) {
+      await supabase.auth.signOut();
+      localStorage.removeItem('wh-session');
+      window.location.replace('/');
+      return;
+    }
+
+    localStorage.setItem(
+      'wh-session',
+      JSON.stringify({
+        username: profile.username,
+        role: profile.role,
+      })
+    );
+  } catch (error) {
+    console.error('Authentication check failed:', error);
+    localStorage.removeItem('wh-session');
+    window.location.replace('/');
   }
 })();
 
 type Item = { sku: string; name: string; qty: number; slot: number; price?: number };
 type Log = { id: number; time: string; sku: string; type: 'IN' | 'OUT'; qty: number; note: string };
+let logs: Log[] = [];
 type Move = 'IN' | 'OUT';
-type SaleLine = { sku: string; name: string; qty: number; returned: number; unitPrice?: number };
+type SaleLine = {
+  sku: string;
+  name: string;
+  qty: number;
+  returned: number;
+  unitPrice?: number;
+  saleItemId?: string;
+};
 type Sale = { id: string; time: string; customer: string; reference: string; lines: SaleLine[]; subtotal?: number; discountRate?: number; vat?: number; total?: number };
-type ReturnEntry = { id: string; saleId: string; sku: string; product: string; qty: number; reason: string; handledBy: string; status: 'Subject for review' | 'Reviewed'; time: string };
+
+type ReturnEntry = {
+  id: string;
+  saleId: string;
+  sku: string;
+  product: string;
+  qty: number;
+  reason: string;
+  handledBy: string;
+  status: 'Pending review' | 'Reviewed';
+  time: string;
+};
+
 type User = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean; password: string };
 type Supplier = { id: string; name: string; contactPerson: string; phone: string; email: string; address: string; active: boolean };
 type Category = { id: string; name: string };
@@ -36,6 +83,76 @@ const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
 
 const COLS = 4, LEVELS = 3, SLOTS = COLS * LEVELS, LOW = 10, CAP = 200;
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
+
+
+async function loadInventoryHistoryFromSupabase() {
+  const { data, error } = await supabase
+    .from('inventory_movements')
+    .select('id, movement_type, quantity, note, created_at, products(sku)')
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error('Failed to load inventory history from Supabase:', error);
+    return;
+  }
+
+  if (!data) return;
+
+  logs = data.map((movement) => {
+    const product = movement.products as unknown as
+      | { sku: string }
+      | null;
+
+    return {
+      id: Number(String(movement.id).replace(/\D/g, '').slice(-12)) || 0,
+      time: new Date(movement.created_at).toLocaleString([], {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }),
+      sku: product?.sku ?? '',
+      type: movement.movement_type === 'stock_in' ? 'IN' : 'OUT',
+      qty: Number(movement.quantity),
+      note: movement.note ?? '',
+    };
+  });
+
+  renderUI();
+}
+
+async function loadProductsFromSupabase() {
+  const { data, error } = await supabase
+    .from('products')
+    .select('sku, name, stock_quantity, selling_price')
+    .order('sku');
+
+  if (error) {
+    console.error('Failed to load products from Supabase:', error);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    console.warn('Supabase products table is empty.');
+    return;
+  }
+
+  items = data.map((product, index) => {
+    const existingItem = items.find(
+      (item) => item.sku === product.sku
+    );
+
+    return {
+      sku: product.sku,
+      name: product.name,
+      qty: product.stock_quantity,
+      slot: existingItem?.slot ?? index,
+      price: Number(product.selling_price ?? 0),
+    };
+  });
+
+  save();
+  renderUI();
+}
 
 /* ---------- state ---------- */
 const seed: Item[] = [
@@ -89,8 +206,317 @@ let users: User[] = readUsers([
   { id: 'builtin-employee', username: initialCreds.employee?.username ?? 'cashier', role: 'employee', firstName: 'Store', lastName: 'Cashier', email: 'cashier@example.com', active: true, password: initialCreds.employee?.password ?? 'password123' },
 ]);
 let items: Item[] = load('wh-items', seed);
-let logs: Log[] = load('wh-logs', []);
-let sales: Sale[] = load('wh-sales', []);
+
+
+async function loadSalesFromSupabase() {
+  const { data: saleRows, error: salesError } = await supabase
+    .from('sales')
+    .select('id, sale_number, customer_name, reference, subtotal, discount, total, created_at')
+    .order('created_at', { ascending: false });
+
+  if (salesError) {
+    console.error('Failed to load sales from Supabase:', salesError);
+    return;
+  }
+
+  if (!saleRows || saleRows.length === 0) {
+    sales = [];
+    renderUI();
+    return;
+  }
+
+  const saleIds = saleRows.map((sale) => sale.id);
+
+  const { data: itemRows, error: itemsError } = await supabase
+    .from('sale_items')
+    .select('id, sale_id, product_id, product_name, quantity, unit_price')
+    .in('sale_id', saleIds);
+
+  if (itemsError) {
+    console.error('Failed to load sale items from Supabase:', itemsError);
+    return;
+  }
+  
+  const returnedBySaleItemId = new Map<string, number>();
+
+if (itemRows && itemRows.length > 0) {
+  const { data: returnRows, error: returnsError } = await supabase
+    .from('returns')
+    .select('sale_item_id, quantity')
+    .in('sale_item_id', itemRows.map((line) => line.id));
+
+  if (returnsError) {
+    console.error('Failed to load returned quantities:', returnsError);
+    return;
+  }
+
+  for (const record of returnRows ?? []) {
+    if (!record.sale_item_id) continue;
+
+    const previous = returnedBySaleItemId.get(record.sale_item_id) ?? 0;
+    returnedBySaleItemId.set(
+      record.sale_item_id,
+      previous + Number(record.quantity)
+    );
+  }
+}
+
+  const { data: productRows, error: productsError } = await supabase
+    .from('products')
+    .select('id, sku');
+
+  if (productsError) {
+    console.error('Failed to load product SKUs for sales:', productsError);
+    return;
+  }
+
+  const skuByProductId = new Map(
+    (productRows ?? []).map((product) => [product.id, product.sku])
+  );
+
+  sales = saleRows.map((row) => {
+    const subtotal = Number(row.subtotal ?? 0);
+    const discount = Number(row.discount ?? 0);
+    const total = Number(row.total ?? 0);
+
+    const saleLines: SaleLine[] = (itemRows ?? [])
+      .filter((line) => line.sale_id === row.id)
+  .map((line) => ({
+    sku: skuByProductId.get(line.product_id) ?? '',
+    name: line.product_name,
+    qty: Number(line.quantity),
+    returned: returnedBySaleItemId.get(line.id) ?? 0,
+    unitPrice: Number(line.unit_price),
+    saleItemId: line.id,
+    }));
+
+    return {
+      id: row.id,
+      time: row.created_at,
+      customer: row.customer_name ?? '',
+      reference: row.reference || row.sale_number,
+      subtotal,
+      discountRate: subtotal > 0 ? (discount / subtotal) * 100 : 0,
+      vat: Number((total - subtotal + discount).toFixed(2)),
+      total,
+      lines: saleLines,
+    };
+  });
+
+  renderUI();
+}
+
+
+async function loadReturnsFromSupabase() {
+  const { data: returnRows, error: returnsError } = await supabase
+    .from('returns')
+    .select(
+      'id, sale_id, sale_item_id, quantity, reason, handled_by, created_at, status'
+    )
+    .order('created_at', { ascending: false });
+
+  if (returnsError) {
+    console.error('Failed to load returns:', returnsError);
+    return;
+  }
+
+  const saleItemIds = [
+    ...new Set(
+      (returnRows ?? [])
+        .map((row) => row.sale_item_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+
+  const saleItemById = new Map<
+    string,
+    { product_id: string; product_name: string }
+  >();
+
+  if (saleItemIds.length > 0) {
+    const { data: saleItemRows, error: saleItemsError } = await supabase
+      .from('sale_items')
+      .select('id, product_id, product_name')
+      .in('id', saleItemIds);
+
+    if (saleItemsError) {
+      console.error('Failed to load return sale items:', saleItemsError);
+      return;
+    }
+
+    for (const item of saleItemRows ?? []) {
+      saleItemById.set(item.id, {
+        product_id: item.product_id,
+        product_name: item.product_name,
+      });
+    }
+  }
+
+  const productIds = [
+    ...new Set(
+      [...saleItemById.values()].map((item) => item.product_id)
+    ),
+  ];
+
+  const skuByProductId = new Map<string, string>();
+
+  if (productIds.length > 0) {
+    const { data: productRows, error: productsError } = await supabase
+      .from('products')
+      .select('id, sku')
+      .in('id', productIds);
+
+    if (productsError) {
+      console.error('Failed to load return product SKUs:', productsError);
+      return;
+    }
+
+    for (const product of productRows ?? []) {
+      skuByProductId.set(product.id, product.sku ?? '');
+    }
+  }
+
+  returnEntries = (returnRows ?? []).map((row) => {
+    const saleItem = row.sale_item_id
+      ? saleItemById.get(row.sale_item_id)
+      : undefined;
+
+    return {
+      id: row.id,
+      saleId: row.sale_id,
+      sku: saleItem
+        ? skuByProductId.get(saleItem.product_id) ?? ''
+        : '',
+      product: saleItem?.product_name ?? 'Unknown product',
+      qty: Number(row.quantity),
+      reason: row.reason ?? '',
+      handledBy: row.handled_by ?? 'Unknown',
+      status: row.status as ReturnEntry['status'],
+      time: row.created_at,
+    };
+  });
+
+  renderUI();
+}
+
+
+async function loadSuppliersFromSupabase() {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('id, name, contact_person, phone, email, address, active')
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Failed to load suppliers:', error);
+    setModalMsg(
+      'supplierFormMessage',
+      `Failed to load suppliers: ${error.message}`
+    );
+    return;
+  }
+
+  suppliers = (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    contactPerson: row.contact_person ?? '',
+    phone: row.phone ?? '',
+    email: row.email ?? '',
+    address: row.address ?? '',
+    active: row.active ?? true,
+  }));
+
+  renderSuppliers();
+}
+
+
+async function loadCategoriesFromSupabase() {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, name')
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Failed to load categories:', error);
+    setModalMsg(
+      'categoryFormMessage',
+      `Failed to load categories: ${error.message}`
+    );
+    return;
+  }
+
+  categories = (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+  }));
+
+  renderCategories();
+}
+
+async function loadAuditLogsFromSupabase() {
+  const { data, error } = await supabase
+    .from('audit_logs')
+    .select('id, user_id, module, action, description, created_at')
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error('Failed to load audit logs:', error);
+    return;
+  }
+
+  const userIds = [...new Set((data ?? []).map((row) => row.user_id).filter((id): id is string => Boolean(id)))];
+  const nameById = new Map<string, string>();
+
+  if (userIds.length > 0) {
+    const { data: profileRows } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', userIds);
+
+    for (const profile of profileRows ?? []) {
+      nameById.set(profile.id, profile.username ?? '');
+    }
+  }
+
+  auditEntries = (data ?? []).map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    handledBy: (row.user_id && nameById.get(row.user_id)) || 'System',
+    module: row.module,
+    action: row.action,
+    description: row.description,
+    ipAddress: 'Unavailable in local browser',
+  }));
+
+  renderAuditLogs();
+}
+
+async function loadUsersFromSupabase() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, email, first_name, last_name, role, active')
+    .order('username', { ascending: true });
+
+  if (error) {
+    console.error('Failed to load users:', error);
+    return;
+  }
+
+  users = (data ?? []).map((row) => ({
+    id: row.id,
+    username: row.username ?? '',
+    role: row.role === 'admin' ? ('admin' as const) : ('employee' as const),
+    firstName: row.first_name ?? '',
+    lastName: row.last_name ?? '',
+    email: row.email ?? '',
+    active: row.active ?? true,
+    password: '',
+  }));
+
+  renderUsers();
+}
+
+let sales: Sale[] = [];
 let returnEntries: ReturnEntry[] = load('wh-returns', []);
 let suppliers: Supplier[] = load('wh-suppliers', []);
 let categories: Category[] = load('wh-categories', [
@@ -112,7 +538,6 @@ let auditEntries: AuditEntry[] = Array.isArray(storedAuditEntries)
 let type: Move = 'IN';
 const save = () => {
   localStorage.setItem('wh-items', JSON.stringify(items));
-  localStorage.setItem('wh-logs', JSON.stringify(logs));
   localStorage.setItem('wh-sales', JSON.stringify(sales));
   localStorage.setItem('wh-returns', JSON.stringify(returnEntries));
   localStorage.setItem('wh-users', JSON.stringify(users));
@@ -131,6 +556,23 @@ function recordAudit(module: string, action: string, description: string, handle
   });
   auditEntries = auditEntries.slice(0, 1000);
   renderAuditLogs();
+
+  // Save a copy to Supabase in the background.
+  void (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const userId = data.session?.user.id;
+      if (!userId) return;
+
+      const { error } = await supabase
+        .from('audit_logs')
+        .insert({ user_id: userId, module, action, description });
+
+      if (error) console.error('Failed to save audit log:', error);
+    } catch (error) {
+      console.error('Unexpected audit log error:', error);
+    }
+  })();
 }
 
 /* ---------- 3D scene ---------- */
@@ -335,6 +777,7 @@ function renderUsers() {
 let supplierSort: { field: keyof Pick<Supplier, 'name' | 'contactPerson' | 'phone' | 'email' | 'address'>; direction: 1 | -1 } = { field: 'name', direction: 1 };
 let supplierPage = 1;
 const SUPPLIERS_PER_PAGE = 10;
+
 function renderSuppliers() {
   const table = $('#suppliersTable');
   if (!table) return;
@@ -351,7 +794,26 @@ function renderSuppliers() {
     ? `<thead><tr>${columns.map(([field, label]) => `<th><button type="button" class="user-sort" data-supplier-sort="${field}">${label}<span aria-hidden="true">${supplierSort.field === field ? (supplierSort.direction === 1 ? '↑' : '↓') : '↕'}</span></button></th>`).join('')}<th>Status</th></tr></thead><tbody>${pageSuppliers.map((supplier) => `<tr>
         <td><button type="button" class="supplier-name-button" data-edit-supplier="${esc(supplier.id)}">${esc(supplier.name)}</button></td>
         <td class="supplier-contact-cell" title="${esc(supplier.contactPerson)}">${esc(supplier.contactPerson)}</td><td>${esc(supplier.phone)}</td><td>${esc(supplier.email)}</td><td>${esc(supplier.address)}</td>
-        <td><button type="button" class="user-status ${supplier.active ? 'is-active' : 'is-inactive'}" data-toggle-supplier="${esc(supplier.id)}" aria-label="Set ${esc(supplier.name)} ${supplier.active ? 'inactive' : 'active'}">${supplier.active ? 'Active' : 'Inactive'}</button></td>
+
+<td>
+  <button
+    type="button"
+    class="user-status ${supplier.active ? 'is-active' : 'is-inactive'}"
+    data-toggle-supplier="${esc(supplier.id)}"
+    aria-label="Set ${esc(supplier.name)} ${supplier.active ? 'inactive' : 'active'}"
+  >
+    ${supplier.active ? 'Active' : 'Inactive'}
+  </button>
+  <button
+    type="button"
+    class="user-delete"
+    data-delete-supplier="${esc(supplier.id)}"
+    aria-label="Delete ${esc(supplier.name)}"
+    title="Delete supplier"
+  >
+    Delete
+  </button>
+</td>
       </tr>`).join('')}</tbody>`
     : `<tbody><tr><td class="users-empty" colspan="6">${suppliers.length ? 'No suppliers match that name.' : 'No suppliers yet. Add your first supplier to get started.'}</td></tr></tbody>`;
   const pagination = $('#suppliersPagination');
@@ -473,8 +935,64 @@ $('#addSupplierButton')?.addEventListener('click', () => openSupplierEditor());
 $('#closeSupplierModal')?.addEventListener('click', () => closeModal('supplierModal'));
 $('#cancelSupplierModal')?.addEventListener('click', () => closeModal('supplierModal'));
 $('#supplierModal')?.addEventListener('click', (event) => { if ((event.target as HTMLElement).id === 'supplierModal') closeModal('supplierModal'); });
-$('#suppliersTable')?.addEventListener('click', (event) => {
+$('#suppliersTable')?.addEventListener('click', async (event) => {
+
   const target = event.target as HTMLElement;
+  
+const remove = target.closest<HTMLButtonElement>(
+  '[data-delete-supplier]'
+);
+
+if (remove) {
+  const supplier = suppliers.find(
+    (entry) => entry.id === remove.dataset.deleteSupplier
+  );
+
+  if (
+    !supplier ||
+    !window.confirm(
+      `Delete supplier "${supplier.name}"? This cannot be undone.`
+    )
+  ) {
+    return;
+  }
+
+  remove.disabled = true;
+
+  try {
+    const { error } = await supabase
+      .from('suppliers')
+      .delete()
+      .eq('id', supplier.id);
+
+    if (error) throw error;
+
+    suppliers = suppliers.filter(
+      (entry) => entry.id !== supplier.id
+    );
+
+    recordAudit(
+      'Suppliers',
+      'Deleted',
+      `${supplier.name} supplier deleted.`
+    );
+
+    save();
+    renderSuppliers();
+
+    const message = $('#suppliersMessage');
+    if (message) {
+      message.textContent = 'Supplier deleted successfully.';
+      message.className = 'users-message ok';
+    }
+  } catch (error) {
+    console.error('Failed to delete supplier:', error);
+    alert('Failed to delete supplier. It may be referenced by other records.');
+  } finally {
+    remove.disabled = false;
+  }
+}
+
   const sort = target.closest<HTMLButtonElement>('[data-supplier-sort]');
   if (sort) {
     const field = sort.dataset.supplierSort as typeof supplierSort.field;
@@ -483,40 +1001,151 @@ $('#suppliersTable')?.addEventListener('click', (event) => {
   }
   const edit = target.closest<HTMLButtonElement>('[data-edit-supplier]');
   if (edit) { const supplier = suppliers.find((entry) => entry.id === edit.dataset.editSupplier); if (supplier) openSupplierEditor(supplier); return; }
-  const status = target.closest<HTMLButtonElement>('[data-toggle-supplier]');
+  
+  const status = target.closest<HTMLButtonElement>(
+    '[data-toggle-supplier]'
+  );
+
   if (status) {
-    const supplier = suppliers.find((entry) => entry.id === status.dataset.toggleSupplier);
-    if (supplier) {
-      supplier.active = !supplier.active;
-      recordAudit('Suppliers', 'Status changed', `${supplier.name} marked ${supplier.active ? 'active' : 'inactive'}.`);
-      save(); renderSuppliers();
+    const supplier = suppliers.find(
+      (entry) => entry.id === status.dataset.toggleSupplier
+    );
+
+    if (!supplier) return;
+
+    const newStatus = !supplier.active;
+    status.disabled = true;
+
+    try {
+      const { error } = await supabase
+        .from('suppliers')
+        .update({ active: newStatus })
+        .eq('id', supplier.id);
+
+      if (error) throw error;
+
+      supplier.active = newStatus;
+
+      recordAudit(
+        'Suppliers',
+        'Status changed',
+        `${supplier.name} marked ${newStatus ? 'active' : 'inactive'}.`
+      );
+
+      save();
+      renderSuppliers();
+    } catch (error) {
+      console.error('Failed to update supplier status:', error);
+      alert('Failed to update supplier status. Please try again.');
+    } finally {
+      status.disabled = false;
     }
   }
 });
+
 $('#suppliersPagination')?.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-supplier-page]');
   if (!button || button.disabled) return;
   supplierPage += button.dataset.supplierPage === 'next' ? 1 : -1;
   renderSuppliers();
 });
-$<HTMLFormElement>('#supplierForm')?.addEventListener('submit', (event) => {
+
+
+$<HTMLFormElement>('#supplierForm')?.addEventListener('submit', async (event) => {
   event.preventDefault();
+
   const id = $<HTMLInputElement>('#supplierId').value;
   const name = $<HTMLInputElement>('#supplierName').value.trim();
   const existing = suppliers.find((supplier) => supplier.id === id);
-  if (suppliers.some((supplier) => supplier.id !== id && supplier.name.toLowerCase() === name.toLowerCase())) return setModalMsg('supplierFormMessage', 'A supplier with that name already exists.');
+
+  if (!name) {
+    return setModalMsg('supplierFormMessage', 'Enter a supplier name.');
+  }
+
+  if (
+    suppliers.some(
+      (supplier) =>
+        supplier.id !== id &&
+        supplier.name.toLowerCase() === name.toLowerCase()
+    )
+  ) {
+    return setModalMsg(
+      'supplierFormMessage',
+      'A supplier with that name already exists.'
+    );
+  }
+
   const supplier: Supplier = {
-    id: existing?.id ?? (crypto.randomUUID?.() ?? `supplier-${Date.now()}`), name,
+    id: existing?.id ?? (crypto.randomUUID?.() ?? `supplier-${Date.now()}`),
+    name,
     contactPerson: $<HTMLInputElement>('#supplierContact').value.trim(),
     phone: $<HTMLInputElement>('#supplierPhone').value.trim(),
     email: $<HTMLInputElement>('#supplierEmail').value.trim(),
     address: $<HTMLInputElement>('#supplierAddress').value.trim(),
     active: $<HTMLInputElement>('#supplierActive').checked,
   };
-  suppliers = existing ? suppliers.map((entry) => entry.id === id ? supplier : entry) : [...suppliers, supplier];
-  recordAudit('Suppliers', existing ? 'Updated' : 'Created', `${supplier.name}${supplier.contactPerson ? ` — contact: ${supplier.contactPerson}` : ''}.`);
-  save(); supplierPage = 1; renderSuppliers(); closeModal('supplierModal');
-  const message = $('#suppliersMessage'); message.textContent = existing ? 'Supplier details saved.' : 'Supplier added successfully.'; message.className = 'users-message ok';
+
+  const supplierData = {
+    name: supplier.name,
+    contact_person: supplier.contactPerson,
+    phone: supplier.phone,
+    email: supplier.email,
+    address: supplier.address,
+  };
+
+  const submitButton = $<HTMLFormElement>('#supplierForm')
+    .querySelector<HTMLButtonElement>('button[type="submit"]');
+
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const result = existing
+      ? await supabase
+          .from('suppliers')
+          .update(supplierData)
+          .eq('id', existing.id)
+      : await supabase
+          .from('suppliers')
+          .insert(supplierData);
+
+    if (result.error) {
+      console.error('Failed to save supplier:', result.error);
+      setModalMsg(
+        'supplierFormMessage',
+        `Failed to save supplier: ${result.error.message}`
+      );
+      return;
+    }
+
+    await loadSuppliersFromSupabase();
+
+    recordAudit(
+      'Suppliers',
+      existing ? 'Updated' : 'Created',
+      `${supplier.name}${supplier.contactPerson ? ` — contact: ${supplier.contactPerson}` : ''}.`
+    );
+
+    save();
+    supplierPage = 1;
+    renderSuppliers();
+    closeModal('supplierModal');
+
+    const message = $('#suppliersMessage');
+    if (message) {
+      message.textContent = existing
+        ? 'Supplier details saved.'
+        : 'Supplier added successfully.';
+      message.className = 'users-message ok';
+    }
+  } catch (error) {
+    console.error('Unexpected supplier save error:', error);
+    setModalMsg(
+      'supplierFormMessage',
+      'Something went wrong while saving the supplier.'
+    );
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
 
 function openCategoryEditor(category?: Category) {
@@ -535,38 +1164,148 @@ $('#addCategoryButton')?.addEventListener('click', () => openCategoryEditor());
 $('#closeCategoryModal')?.addEventListener('click', () => closeModal('categoryModal'));
 $('#cancelCategoryModal')?.addEventListener('click', () => closeModal('categoryModal'));
 $('#categoryModal')?.addEventListener('click', (event) => { if ((event.target as HTMLElement).id === 'categoryModal') closeModal('categoryModal'); });
-$('#categoriesTable')?.addEventListener('click', (event) => {
+$('#categoriesTable')?.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
   if (target.closest('[data-category-sort]')) { categorySortDirection = categorySortDirection === 1 ? -1 : 1; renderCategories(); return; }
   const edit = target.closest<HTMLButtonElement>('[data-edit-category]');
   if (edit) { const category = categories.find((entry) => entry.id === edit.dataset.editCategory); if (category) openCategoryEditor(category); return; }
-  const remove = target.closest<HTMLButtonElement>('[data-delete-category]');
-  if (!remove) return;
-  const category = categories.find((entry) => entry.id === remove.dataset.deleteCategory);
-  if (!category || !window.confirm(`Delete category “${category.name}”?`)) return;
-  categories = categories.filter((entry) => entry.id !== category.id);
-  recordAudit('Inventory', 'Category deleted', `${category.name} category deleted.`);
-  save(); renderCategories();
+
+const remove = target.closest<HTMLButtonElement>(
+  '[data-delete-category]'
+);
+
+if (!remove) return;
+
+const category = categories.find(
+  (entry) => entry.id === remove.dataset.deleteCategory
+);
+
+if (!category || !window.confirm(`Delete category “${category.name}”?`)) {
+  return;
+}
+
+remove.disabled = true;
+
+try {
+  const { error } = await supabase
+    .from('categories')
+    .delete()
+    .eq('id', category.id);
+
+  if (error) throw error;
+
+  categories = categories.filter(
+    (entry) => entry.id !== category.id
+  );
+
+  recordAudit(
+    'Inventory',
+    'Category deleted',
+    `${category.name} category deleted.`
+  );
+
+  save();
+  renderCategories();
+} catch (error) {
+  console.error('Failed to delete category:', error);
+  alert('Failed to delete category. Please try again.');
+} finally {
+  remove.disabled = false;
+}
 });
+
 $('#categoriesPagination')?.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-category-page]');
   if (!button || button.disabled) return;
   categoryPage += button.dataset.categoryPage === 'next' ? 1 : -1;
   renderCategories();
 });
-$<HTMLFormElement>('#categoryForm')?.addEventListener('submit', (event) => {
+
+
+$<HTMLFormElement>('#categoryForm')?.addEventListener('submit', async (event) => {
   event.preventDefault();
+
   const id = $<HTMLInputElement>('#categoryId').value;
   const name = $<HTMLInputElement>('#categoryName').value.trim();
   const existing = categories.find((category) => category.id === id);
-  if (!name) return setModalMsg('categoryFormMessage', 'Enter a category name.');
-  if (categories.some((category) => category.id !== id && category.name.toLowerCase() === name.toLowerCase())) return setModalMsg('categoryFormMessage', 'That category already exists.');
-  const category: Category = { id: existing?.id ?? (crypto.randomUUID?.() ?? `category-${Date.now()}`), name };
-  categories = existing ? categories.map((entry) => entry.id === id ? category : entry) : [...categories, category];
-  recordAudit('Inventory', existing ? 'Category updated' : 'Category created', `${category.name} category ${existing ? 'updated' : 'created'}.`);
-  save(); categoryPage = 1; renderCategories(); closeModal('categoryModal');
-  const message = $('#categoriesMessage'); message.textContent = existing ? 'Category updated.' : 'Category added.'; message.className = 'users-message ok';
+
+  if (!name) {
+    return setModalMsg('categoryFormMessage', 'Enter a category name.');
+  }
+
+  if (
+    categories.some(
+      (category) =>
+        category.id !== id &&
+        category.name.toLowerCase() === name.toLowerCase()
+    )
+  ) {
+    return setModalMsg(
+      'categoryFormMessage',
+      'That category already exists.'
+    );
+  }
+
+  const category: Category = {
+    id: existing?.id ?? (crypto.randomUUID?.() ?? `category-${Date.now()}`),
+    name,
+  };
+
+  const submitButton = $<HTMLFormElement>('#categoryForm')
+    .querySelector<HTMLButtonElement>('button[type="submit"]');
+
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const result = existing
+      ? await supabase
+          .from('categories')
+          .update({ name })
+          .eq('id', existing.id)
+      : await supabase
+          .from('categories')
+          .insert({ name });
+
+    if (result.error) {
+      console.error('Failed to save category:', result.error);
+      setModalMsg(
+        'categoryFormMessage',
+        `Failed to save category: ${result.error.message}`
+      );
+      return;
+    }
+
+    await loadCategoriesFromSupabase();
+
+    recordAudit(
+      'Inventory',
+      existing ? 'Category updated' : 'Category created',
+      `${category.name} category ${existing ? 'updated' : 'created'}.`
+    );
+
+    save();
+    categoryPage = 1;
+    renderCategories();
+    closeModal('categoryModal');
+
+    const message = $('#categoriesMessage');
+    if (message) {
+      message.textContent = existing
+        ? 'Category updated.'
+        : 'Category added.';
+      message.className = 'users-message ok';
+    }
+  } catch (error) {
+    console.error('Unexpected category save error:', error);
+    setModalMsg(
+      'categoryFormMessage',
+      'Something went wrong while saving the category.'
+    );
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
+
 
 function openUserEditor(user?: User) {
   const form = $<HTMLFormElement>('#userForm');
@@ -605,20 +1344,20 @@ $('#usersTable')?.addEventListener('click', (event) => {
   }
   const edit = target.closest<HTMLButtonElement>('[data-edit-user]');
   if (edit) { const user = users.find((entry) => entry.id === edit.dataset.editUser); if (user) openUserEditor(user); return; }
+
   const remove = target.closest<HTMLButtonElement>('[data-delete-user]');
   if (remove) {
     const user = users.find((entry) => entry.id === remove.dataset.deleteUser);
     if (!user) return;
-    if (getSession()?.username === user.username) {
-      const message = $('#usersMessage'); message.textContent = 'You cannot delete the account you are currently using.';
-      message.className = 'users-message err'; return;
-    }
-    users = users.filter((entry) => entry.id !== user.id);
-    recordAudit('Users', 'Deleted', `User ${user.username} was deleted.`);
-    save(); renderUsers();
-    const message = $('#usersMessage'); message.textContent = `${user.username} was deleted.`; message.className = 'users-message';
+    const message = $('#usersMessage');
+    message.textContent = getSession()?.username === user.username
+      ? 'You cannot delete the account you are currently using.'
+      : `Users can't be deleted from the app. Set ${user.username} to Inactive to block access, or remove the account in Supabase (Authentication → Users).`;
+    message.className = 'users-message err';
+    return;
   }
 });
+
 $('#usersPagination')?.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-user-page]');
   if (!button || button.disabled) return;
@@ -626,31 +1365,84 @@ $('#usersPagination')?.addEventListener('click', (event) => {
   renderUsers();
 });
 
-$<HTMLFormElement>('#userForm')?.addEventListener('submit', (event) => {
+$<HTMLFormElement>('#userForm')?.addEventListener('submit', async (event) => {
   event.preventDefault();
+
   const id = $<HTMLInputElement>('#userId').value;
   const username = $<HTMLInputElement>('#userUsername').value.trim();
   const firstName = $<HTMLInputElement>('#userFirstName').value.trim();
   const lastName = $<HTMLInputElement>('#userLastName').value.trim();
-  const email = $<HTMLInputElement>('#userEmail').value.trim();
   const role = $<HTMLSelectElement>('#userRole').value as User['role'];
-  const password = $<HTMLInputElement>('#userPassword').value;
+  const active = $<HTMLInputElement>('#userActive').checked;
   const existing = users.find((user) => user.id === id);
-  if (users.some((user) => user.id !== id && user.username.toLowerCase() === username.toLowerCase())) return setModalMsg('userFormMessage', 'That username is already in use.');
-  if (!existing && password.length < 6) return setModalMsg('userFormMessage', 'Password must be at least 6 characters.');
-  if (existing && getSession()?.username === existing.username && !$<HTMLInputElement>('#userActive').checked) return setModalMsg('userFormMessage', 'You cannot deactivate the account you are currently using.');
-  const saved: User = { id: existing?.id ?? (crypto.randomUUID?.() ?? `user-${Date.now()}`), username, firstName, lastName, email, role, active: $<HTMLInputElement>('#userActive').checked, password: existing?.password ?? password };
-  users = existing ? users.map((user) => user.id === id ? saved : user) : [...users, saved];
-  if (existing && getSession()?.username === existing.username && username !== existing.username) localStorage.setItem('wh-session', JSON.stringify({ ...getSession(), username, role }));
-  recordAudit('Users', existing ? 'Updated' : 'Created', `User ${saved.username} (${saved.role === 'admin' ? 'Admin' : 'Cashier'}) ${existing ? 'was updated' : 'was created'}.`);
-  if (saved.id === 'builtin-admin' || saved.id === 'builtin-employee') {
-    const creds = loadCreds();
-    const credentialRole = saved.id === 'builtin-admin' ? 'admin' : 'employee';
-    creds[credentialRole] = { username: saved.username, password: saved.password };
-    saveCreds(creds);
-  } else save();
-  renderUsers(); closeModal('userModal');
-  const message = $('#usersMessage'); message.textContent = existing ? 'User details saved.' : 'User added successfully.'; message.className = 'users-message ok';
+
+  // Adding users from the browser is not supported (needs the Supabase dashboard).
+  if (!existing) {
+    return setModalMsg(
+      'userFormMessage',
+      'New users must be created in Supabase (Authentication → Users). They will show up here automatically.'
+    );
+  }
+
+  if (username.length < 3) {
+    return setModalMsg('userFormMessage', 'Username must be at least 3 characters.');
+  }
+
+  if (users.some((user) => user.id !== id && user.username.toLowerCase() === username.toLowerCase())) {
+    return setModalMsg('userFormMessage', 'That username is already in use.');
+  }
+
+  const currentSession = getSession();
+  const isSelf = currentSession?.username === existing.username;
+
+  if (isSelf && !active) {
+    return setModalMsg('userFormMessage', 'You cannot deactivate the account you are currently using.');
+  }
+
+  if (isSelf && role !== 'admin') {
+    return setModalMsg('userFormMessage', 'You cannot remove your own admin role.');
+  }
+
+  const submitButton = $<HTMLFormElement>('#userForm')
+    .querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        username,
+        first_name: firstName,
+        last_name: lastName,
+        role,
+        active,
+      })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Failed to update user:', error);
+      return setModalMsg('userFormMessage', `Failed to save user: ${error.message}`);
+    }
+
+    if (isSelf && username !== existing.username) {
+      localStorage.setItem('wh-session', JSON.stringify({ ...currentSession, username, role }));
+    }
+
+    await loadUsersFromSupabase();
+
+    recordAudit('Users', 'Updated', `User ${username} (${role === 'admin' ? 'Admin' : 'Cashier'}) was updated.`);
+    save();
+    closeModal('userModal');
+
+    const message = $('#usersMessage');
+    message.textContent = 'User details saved.';
+    message.className = 'users-message ok';
+  } catch (error) {
+    console.error('Unexpected user save error:', error);
+    setModalMsg('userFormMessage', 'Something went wrong while saving the user.');
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
 
 document.querySelectorAll<HTMLButtonElement>('.toggle button').forEach((btn) =>
@@ -664,7 +1456,8 @@ document.querySelectorAll<HTMLButtonElement>('.toggle button').forEach((btn) =>
     msg.textContent = '';
   }));
 
-$<HTMLFormElement>('#form').addEventListener('submit', (e) => {
+
+$<HTMLFormElement>('#form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const sku = $<HTMLInputElement>('#sku').value.trim().toUpperCase();
   const name = $<HTMLInputElement>('#name').value.trim();
@@ -672,22 +1465,65 @@ $<HTMLFormElement>('#form').addEventListener('submit', (e) => {
   const note = $<HTMLInputElement>('#note').value.trim();
   if (!sku || !(qty > 0)) return say('Enter a SKU and a quantity above zero.');
 
-  let it = items.find((i) => i.sku === sku);
+  
+
+let it = items.find((i) => i.sku === sku);
+let freeSlot: number | undefined;
+
+if (!it) {
   if (type === 'OUT') {
-    if (!it) return say(`SKU ${sku} isn't in the warehouse. Log a stock in first.`);
-    if (qty > it.qty) return say(`Only ${it.qty} units of ${sku} on hand. Lower the quantity.`);
-    it.qty -= qty;
-  } else if (it) {
-    it.qty += qty;
-  } else {
-    if (!name) return say('New SKU: add an item name.');
-    const free = [...Array(SLOTS).keys()].find((s) => !items.some((i) => i.slot === s));
-    if (free === undefined) return say('All rack slots are full. Stock out or clear a SKU first.');
-    it = { sku, name, qty, slot: free };
-    items.push(it);
+    return say(`SKU ${sku} isn't in the warehouse. Log a stock in first.`);
   }
 
-  logs.unshift({ id: Date.now(), time: new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }), sku, type, qty, note });
+  if (!name) {
+    return say('New SKU: add an item name.');
+  }
+
+  freeSlot = [...Array(SLOTS).keys()].find(
+    (s) => !items.some((i) => i.slot === s)
+  );
+
+  if (freeSlot === undefined) {
+    return say('All rack slots are full. Stock out or clear a SKU first.');
+  }
+} else if (type === 'OUT' && qty > it.qty) {
+  return say(`Only ${it.qty} units of ${sku} on hand. Lower the quantity.`);
+}
+
+const { data, error } = await supabase.rpc('record_stock_movement', {
+  p_sku: sku,
+  p_type: type === 'IN' ? 'stock_in' : 'stock_out',
+  p_quantity: qty,
+  p_note: note || null,
+  p_name: name || null,
+});
+
+if (error || !data) {
+  console.error('Stock movement failed:', error);
+  return say('Could not save stock movement. Please try again.');
+}
+
+const saved = data as {
+  sku: string;
+  name: string;
+  stock_quantity: number;
+};
+
+if (it) {
+  it.qty = saved.stock_quantity;
+} else {
+  it = {
+    sku: saved.sku,
+    name: saved.name,
+    qty: saved.stock_quantity,
+    slot: freeSlot!,
+    price: 0,
+  };
+
+  items.push(it);
+}
+
+  await loadInventoryHistoryFromSupabase();
   recordAudit('Inventory', type === 'IN' ? 'Stock in' : 'Stock out', `${qty} units of ${sku} ${type === 'IN' ? 'received' : 'dispatched'}${note ? `; ${note}` : ''}.`);
   save(); renderUI();
   const b = boxes.get(sku);
@@ -838,64 +1674,306 @@ $('#cartLines')?.addEventListener('click', (event) => {
   renderSales();
 });
 $('#clearCart')?.addEventListener('click', () => { cart = {}; setSalesMessage('saleMessage', ''); renderSales(); });
-$<HTMLButtonElement>('#completeSale')?.addEventListener('click', () => {
-  const lines = Object.entries(cart).map(([sku, qty]) => ({ item: items.find((entry) => entry.sku === sku), qty }));
-  const unavailable = lines.find(({ item, qty }) => !item || qty > item.qty);
-  if (unavailable) { setSalesMessage('saleMessage', `${unavailable.item?.name ?? 'An item'} no longer has enough stock. Adjust the order and retry.`); renderSales(); return; }
+
+$<HTMLButtonElement>('#completeSale')?.addEventListener('click', async () => {
+  const lines = Object.entries(cart).map(([sku, qty]) => ({
+    item: items.find((entry) => entry.sku === sku),
+    qty,
+  }));
+
+  const unavailable = lines.find(
+    ({ item, qty }) => !item || qty <= 0 || qty > item.qty
+  );
+
+  if (unavailable) {
+    setSalesMessage(
+      'saleMessage',
+      `${unavailable.item?.name ?? 'An item'} no longer has enough stock. Adjust the order and retry.`
+    );
+    renderSales();
+    return;
+  }
+
   if (!lines.length) return;
-  const saleId = `SO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${String(Date.now()).slice(-5)}`;
+
+  if (lines.some(({ item }) => !(Number(item!.price) > 0))) {
+    setSalesMessage(
+      'saleMessage',
+      'Set a unit price for each product before payment.'
+    );
+    return;
+  }
+
+  const saleNumber = `SO-${new Date()
+    .toISOString()
+    .slice(2, 10)
+    .replace(/-/g, '')}-${String(Date.now()).slice(-5)}`;
+
   const time = new Date().toISOString();
   const customer = $<HTMLInputElement>('#saleCustomer').value.trim();
   const reference = $<HTMLInputElement>('#saleReference').value.trim();
-  const discountRate = Math.max(0, Math.min(100, Number($<HTMLInputElement>('#discountRate').value) || 0));
-  const subtotal = lines.reduce((sum, { item, qty }) => sum + Number(item!.price ?? 0) * qty, 0);
-  const discount = subtotal * discountRate / 100;
-  const vat = (subtotal - discount) * 0.12;
-  const total = subtotal - discount + vat;
-  if (lines.some(({ item }) => !(Number(item!.price) > 0))) { setSalesMessage('saleMessage', 'Set a unit price for each product before payment.'); return; }
-  const sale: Sale = { id: saleId, time, customer, reference, subtotal, discountRate, vat, total, lines: lines.map(({ item, qty }) => ({ sku: item!.sku, name: item!.name, qty, returned: 0, unitPrice: Number(item!.price ?? 0) })) };
-  for (const line of sale.lines) {
-    const item = items.find((entry) => entry.sku === line.sku)!;
-    item.qty -= line.qty;
-    logs.unshift({ id: Date.now() + Math.random(), time: new Date(time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }), sku: line.sku, type: 'OUT', qty: line.qty, note: `Sale ${reference || saleId}` });
+  const discountRate = Math.max(
+    0,
+    Math.min(
+      100,
+      Number($<HTMLInputElement>('#discountRate').value) || 0
+    )
+  );
+
+  setSalesMessage('saleMessage', '');
+
+  const { data, error } = await supabase.rpc('complete_pos_sale', {
+    p_sale_number: saleNumber,
+    p_customer_name: customer,
+    p_reference: reference,
+    p_discount_rate: discountRate,
+    p_lines: lines.map(({ item, qty }) => ({
+      sku: item!.sku,
+      qty,
+    })),
+  });
+
+  if (error) {
+    console.error('Checkout failed:', error);
+    setSalesMessage(
+      'saleMessage',
+      `Checkout failed: ${error.message}`
+    );
+    return;
   }
+
+  if (!data?.sale_id) {
+    setSalesMessage(
+      'saleMessage',
+      'The sale response was incomplete. Check Supabase before retrying.'
+    );
+    return;
+  }
+
+  const subtotal = Number(data.subtotal);
+  const discount = Number(data.discount);
+  const vat = Number(data.vat);
+  const total = Number(data.total);
+
+  const sale: Sale = {
+    id: String(data.sale_id),
+    time,
+    customer,
+    reference: reference || saleNumber,
+    subtotal,
+    discountRate,
+    vat,
+    total,
+    lines: lines.map(({ item, qty }) => ({
+      sku: item!.sku,
+      name: item!.name,
+      qty,
+      returned: 0,
+      unitPrice: Number(item!.price),
+    })),
+  };
+
   sales.unshift(sale);
-  recordAudit('Sales', 'Sale completed', `Order ${reference || saleId} completed with ${sale.lines.length} line item${sale.lines.length === 1 ? '' : 's'}.`);
-  cart = {}; save(); renderUI();
-  $<HTMLInputElement>('#saleCustomer').value = ''; $<HTMLInputElement>('#saleReference').value = ''; $<HTMLInputElement>('#discountRate').value = '0';
-  setSalesMessage('saleMessage', `Sale ${reference || saleId} completed. Inventory has been updated.`, true);
+
+  recordAudit(
+    'Sales',
+    'Sale completed',
+    `Order ${saleNumber} completed with ${sale.lines.length} line item${sale.lines.length === 1 ? '' : 's'}.`
+  );
+
+  cart = {};
+  save();
+    await loadSalesFromSupabase();
+
+  $<HTMLInputElement>('#saleCustomer').value = '';
+  $<HTMLInputElement>('#saleReference').value = '';
+  $<HTMLInputElement>('#discountRate').value = '0';
+
+  try {
+    await loadProductsFromSupabase();
+    await loadInventoryHistoryFromSupabase();
+  } catch (refreshError) {
+    console.error('Sale succeeded, but refreshing data failed:', refreshError);
+  }
+
+  renderUI();
+
+  setSalesMessage(
+    'saleMessage',
+    `Sale ${saleNumber} completed! Total: ₱${total.toFixed(2)}.`,
+    true
+  );
 });
-$('#salesHistory')?.addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-return-sale][data-return-sku]');
+
+
+$('#salesHistory')?.addEventListener('click', async (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    '[data-return-sale][data-return-sku]'
+  );
   if (!button) return;
-  const sale = sales.find((entry) => entry.id === button.dataset.returnSale);
-  const line = sale?.lines.find((entry) => entry.sku === button.dataset.returnSku);
-  const input = button.parentElement?.querySelector<HTMLInputElement>('.return-qty');
-  const reasonInput = button.parentElement?.querySelector<HTMLInputElement>('.return-reason');
+
+  const sale = sales.find(
+    (entry) => entry.id === button.dataset.returnSale
+  );
+  const line = sale?.lines.find(
+    (entry) => entry.sku === button.dataset.returnSku
+  );
+
+  const input =
+    button.parentElement?.querySelector<HTMLInputElement>('.return-qty');
+  const reasonInput =
+    button.parentElement?.querySelector<HTMLInputElement>('.return-reason');
+
   const qty = Math.floor(Number(input?.value));
   const reason = reasonInput?.value.trim() ?? '';
-  if (!sale || !line || !(qty > 0) || qty > line.qty - line.returned) { setSalesMessage('returnMessage', 'Enter a return quantity within the remaining order quantity.'); return; }
-  if (!reason) { setSalesMessage('returnMessage', 'Enter a reason for the return.'); reasonInput?.focus(); return; }
-  const item = items.find((entry) => entry.sku === line.sku);
-  if (!item) { setSalesMessage('returnMessage', 'This product is no longer in inventory and cannot be restocked.'); return; }
-  line.returned += qty;
-  item.qty += qty;
-  returnEntries.unshift({ id: `RET-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, saleId: sale.id, sku: line.sku, product: line.name, qty, reason, handledBy: getSession()?.username ?? 'Unknown', status: 'Subject for review', time: new Date().toISOString() });
-  logs.unshift({ id: Date.now(), time: new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }), sku: line.sku, type: 'IN', qty, note: `Return ${sale.reference || sale.id}` });
-  recordAudit('Sales', 'Return restocked', `${qty} × ${line.name} returned for order ${sale.reference || sale.id}.`);
-  save(); renderUI();
-  setSalesMessage('returnMessage', `${qty} × ${line.name} restocked from ${sale.reference || sale.id}.`, true);
+
+  if (
+    !sale ||
+    !line ||
+    !line.saleItemId ||
+    !(qty > 0) ||
+    qty > line.qty - line.returned
+  ) {
+    setSalesMessage(
+      'returnMessage',
+      'Enter a return quantity within the remaining order quantity.'
+    );
+    return;
+  }
+
+  if (!reason) {
+    setSalesMessage('returnMessage', 'Enter a reason for the return.');
+    reasonInput?.focus();
+    return;
+  }
+
+  // Prevent duplicate clicks while the database request is running.
+  button.disabled = true;
+
+  try {
+    const { error } = await supabase.rpc('process_pos_return', {
+      p_sale_item_id: line.saleItemId,
+      p_quantity: qty,
+      p_reason: reason,
+    });
+
+    if (error) {
+      console.error('Failed to process return:', error);
+      setSalesMessage(
+        'returnMessage',
+        `Return failed: ${error.message}`
+      );
+      return;
+    }
+
+    // The database recorded the return request; stock is restored only after Admin approval.
+    // Reload the authoritative data instead of incrementing local stock. 
+    await Promise.all([
+      loadProductsFromSupabase(),
+      loadInventoryHistoryFromSupabase(),
+      loadSalesFromSupabase(),
+    ]);
+
+    recordAudit(
+      'Sales',
+      'Return request submitted',
+      `${qty} × ${line.name} requested for return on order ${sale.reference || sale.id}. Awaiting Admin approval.`
+    );
+
+    save();
+
+    setSalesMessage(
+      'returnMessage',
+      `Return request submitted! ${qty} × ${line.name} for order ${sale.reference || sale.id} is pending Admin review. Stock will be restored after approval.`,
+      true
+    );
+  } catch (error) {
+    console.error('Unexpected return error:', error);
+    setSalesMessage(
+      'returnMessage',
+      'Something went wrong while processing the return. Check the database before retrying.'
+    );
+  } finally {
+    button.disabled = false;
+  }
 });
-$('#returnRegister')?.addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-review-return]');
+
+
+$('#returnRegister')?.addEventListener('click', async (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    '[data-review-return]'
+  );
+
   if (!button) return;
-  const entry = returnEntries.find((record) => record.id === button.dataset.reviewReturn);
+
+  const entry = returnEntries.find(
+    (record) => record.id === button.dataset.reviewReturn
+  );
+
   if (!entry) return;
-  entry.status = 'Reviewed';
-  save(); renderSales();
+
+  if (entry.status === 'Reviewed') return;
+
+  button.disabled = true;
+
+  try {
+    const { error } = await supabase.rpc('approve_pos_return', {
+      p_return_id: entry.id,
+    });
+
+    if (error) {
+      console.error('Failed to approve return:', error);
+      setSalesMessage(
+        'returnMessage',
+        `Could not approve return: ${error.message}`
+      );
+      return;
+    }
+
+    await Promise.all([
+      loadReturnsFromSupabase(),
+      loadProductsFromSupabase(),
+      loadInventoryHistoryFromSupabase(),
+      loadSalesFromSupabase(),
+    ]);
+
+    recordAudit(
+      'Returns',
+      'Return approved',
+      `${entry.qty} × ${entry.product} approved and returned to stock.`
+    );
+
+    save();
+    renderUI();
+
+    setSalesMessage(
+      'returnMessage',
+      `Return approved! ${entry.qty} × ${entry.product} has been added back to stock.`,
+      true
+    );
+  } catch (error) {
+    console.error('Unexpected return approval error:', error);
+
+    setSalesMessage(
+      'returnMessage',
+      'Something went wrong. Check the return status and stock in Supabase before retrying.'
+    );
+  } finally {
+    button.disabled = false;
+  }
 });
+
 document.querySelectorAll<HTMLButtonElement>('.sales-tab').forEach((tab) => tab.addEventListener('click', () => showSalesView(tab.dataset.salesView as 'pos' | 'returns')));
 $('#viewAllReturns')?.addEventListener('click', () => { showSalesView('returns'); switchView('sales'); });
+
+void loadProductsFromSupabase();
+void loadInventoryHistoryFromSupabase();
+void loadSalesFromSupabase();
+void loadReturnsFromSupabase();
+void loadSuppliersFromSupabase();
+void loadCategoriesFromSupabase();
+void loadUsersFromSupabase();
+void loadAuditLogsFromSupabase();
 
 renderUI();
 resize();
@@ -911,13 +1989,22 @@ window.addEventListener('load', () => {
   }, 800);
 });
 
+
 /* ---------- Logout ---------- */
-$('#logoutBtn')?.addEventListener('click', () => {
+$('#logoutBtn')?.addEventListener('click', async () => {
   recordAudit('Authentication', 'Signed out', 'User signed out.');
   save();
+
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.error('Supabase sign-out failed:', error);
+  }
+
   localStorage.removeItem('wh-session');
   window.location.replace('/');
 });
+
 
 /* ---------- Footer Nav Submenus ---------- */
 document.querySelectorAll<HTMLButtonElement>('.nav-item.has-submenu').forEach((btn) => {
@@ -1003,36 +2090,13 @@ function switchView(view: 'dashboard' | 'movement' | 'categories' | 'settings' |
     if (settingRole && session?.role)     settingRole.textContent = session.role;
 
     // Populate password (masked by default)
-    const creds = loadCreds();
-    const role  = session?.role as string;
-    const managedUser = users.find((user) => user.username === session?.username);
-    const currentPassword = managedUser?.password ?? creds[role]?.password ?? '';
+    // Password is never readable (Supabase stores it hashed). Always show dots.
     const passDisplay = $<HTMLElement>('#settingPassDisplay');
-    let passRevealed = false;
-    if (passDisplay) passDisplay.textContent = '•'.repeat(currentPassword.length || 8);
+    if (passDisplay) passDisplay.textContent = '••••••••';
 
-    // Wire reveal toggle (remove old listener by cloning the button)
-    const oldBtn = $<HTMLButtonElement>('#togglePassReveal');
-    if (oldBtn) {
-      const newBtn = oldBtn.cloneNode(true) as HTMLButtonElement;
-      oldBtn.replaceWith(newBtn);
-      newBtn.addEventListener('click', () => {
-        passRevealed = !passRevealed;
-        if (passDisplay) {
-          passDisplay.textContent = passRevealed
-            ? currentPassword
-            : '•'.repeat(currentPassword.length || 8);
-        }
-        // Swap eye icon
-        const eyeSvg = newBtn.querySelector('svg');
-        if (eyeSvg) {
-          eyeSvg.innerHTML = passRevealed
-            ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>'
-            : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
-        }
-        newBtn.style.color = passRevealed ? 'var(--accent)' : 'var(--muted)';
-      });
-    }
+    // Hide the reveal (eye) button, since there is nothing to reveal.
+    const revealBtn = $<HTMLButtonElement>('#togglePassReveal');
+    if (revealBtn) revealBtn.style.display = 'none';
   } else {
     // Re-mask password when leaving settings
     const passDisplay = $<HTMLElement>('#settingPassDisplay');
@@ -1192,87 +2256,142 @@ $('#cancelPasswordModal')?.addEventListener('click', () => closeModal('passwordM
 });
 
 /* ── Change Username ── */
-$<HTMLFormElement>('#usernameForm')?.addEventListener('submit', (e) => {
+$<HTMLFormElement>('#usernameForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+
   const session = getSession();
   if (!session) return;
-  
-  const creds  = loadCreds();
-  const role   = session.role;
-  const stored = creds[role];
-  const managedUser = users.find((user) => user.username === session.username);
-  const enteredPass = ($<HTMLInputElement>('#unCurrentPass')).value;
-  const newName     = ($<HTMLInputElement>('#unNewName')).value.trim();
 
-  if ((!managedUser && !stored) || enteredPass !== (managedUser?.password ?? stored?.password)) {
-    return setModalMsg('unMsg', 'Incorrect current password.');
+  const enteredPass = $<HTMLInputElement>('#unCurrentPass').value;
+  const newName = $<HTMLInputElement>('#unNewName').value.trim();
+
+  if (!enteredPass) {
+    return setModalMsg('unMsg', 'Enter your current password.');
   }
-  if (!newName || newName.length < 3) {
+  if (newName.length < 3) {
     return setModalMsg('unMsg', 'Username must be at least 3 characters.');
   }
-
-  // Update credentials & session
-  if (managedUser) {
-    managedUser.username = newName;
-    if (managedUser.id === 'builtin-admin' || managedUser.id === 'builtin-employee') {
-      stored.username = newName;
-      saveCreds(creds);
-    } else save();
-  } else {
-    stored.username = newName;
-    saveCreds(creds);
+  if (newName.toLowerCase() === session.username.toLowerCase()) {
+    return setModalMsg('unMsg', 'That is already your username.');
   }
-  localStorage.setItem('wh-session', JSON.stringify({ ...session, username: newName }));
-  recordAudit('Settings', 'Username changed', `Username changed from ${session.username} to ${newName}.`, newName);
-  save();
+  if (users.some((user) => user.username.toLowerCase() === newName.toLowerCase())) {
+    return setModalMsg('unMsg', 'That username is already in use.');
+  }
 
-  setModalMsg('unMsg', 'Username updated successfully!', true);
-  setTimeout(() => {
-    closeModal('usernameModal');
-    // Refresh settings display
+  const submitButton = $<HTMLFormElement>('#usernameForm')
+    .querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const user = userData.user;
+
+    if (userError || !user?.email) {
+      return setModalMsg('unMsg', 'Could not read your account. Please log in again.');
+    }
+
+    // Check the current password by signing in with it.
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: enteredPass,
+    });
+
+    if (verifyError) {
+      return setModalMsg('unMsg', 'Incorrect current password.');
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ username: newName })
+      .eq('id', user.id);
+
+    if (updateError) {
+      console.error('Failed to change username:', updateError);
+      return setModalMsg('unMsg', `Failed to change username: ${updateError.message}`);
+    }
+
+    const oldName = session.username;
+    localStorage.setItem('wh-session', JSON.stringify({ ...session, username: newName }));
+    recordAudit('Settings', 'Username changed', `Username changed from ${oldName} to ${newName}.`, newName);
+    save();
+
+    await loadUsersFromSupabase();
+
     const settingUser = $<HTMLElement>('#settingUser');
     if (settingUser) settingUser.textContent = newName;
-  }, 1200);
+
+    setModalMsg('unMsg', 'Username updated successfully!', true);
+    setTimeout(() => closeModal('usernameModal'), 1200);
+  } catch (error) {
+    console.error('Unexpected username change error:', error);
+    setModalMsg('unMsg', 'Something went wrong while changing the username.');
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
 
 /* ── Change Password ── */
-$<HTMLFormElement>('#passwordForm')?.addEventListener('submit', (e) => {
+/* ── Change Password ── */
+$<HTMLFormElement>('#passwordForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const session = getSession();
-  if (!session) return;
 
-  const creds      = loadCreds();
-  const role       = session.role;
-  const stored     = creds[role];
-  const managedUser = users.find((user) => user.username === session.username);
-  const currentPass = ($<HTMLInputElement>('#pwCurrentPass')).value;
-  const newPass     = ($<HTMLInputElement>('#pwNewPass')).value;
-  const confirmPass = ($<HTMLInputElement>('#pwConfirmPass')).value;
+  const currentPass = $<HTMLInputElement>('#pwCurrentPass').value;
+  const newPass = $<HTMLInputElement>('#pwNewPass').value;
+  const confirmPass = $<HTMLInputElement>('#pwConfirmPass').value;
 
-  if ((!managedUser && !stored) || currentPass !== (managedUser?.password ?? stored?.password)) {
-    return setModalMsg('pwMsg', 'Incorrect current password.');
+  if (!currentPass) {
+    return setModalMsg('pwMsg', 'Enter your current password.');
   }
-  if (newPass.length < 6) {
-    return setModalMsg('pwMsg', 'New password must be at least 6 characters.');
+  if (newPass.length < 8) {
+    return setModalMsg('pwMsg', 'New password must be at least 8 characters.');
   }
   if (newPass !== confirmPass) {
     return setModalMsg('pwMsg', 'Passwords do not match.');
   }
-
-  if (managedUser) {
-    managedUser.password = newPass;
-    if (managedUser.id === 'builtin-admin' || managedUser.id === 'builtin-employee') {
-      stored.password = newPass;
-      saveCreds(creds);
-    } else save();
-  } else {
-    stored.password = newPass;
-    saveCreds(creds);
+  if (newPass === currentPass) {
+    return setModalMsg('pwMsg', 'New password must be different from the current one.');
   }
 
-  recordAudit('Settings', 'Password changed', 'Account password was changed.');
-  save();
+  const submitButton = $<HTMLFormElement>('#passwordForm')
+    .querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
 
-  setModalMsg('pwMsg', 'Password changed successfully!', true);
-  setTimeout(() => closeModal('passwordModal'), 1200);
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const email = userData.user?.email;
+
+    if (userError || !email) {
+      return setModalMsg('pwMsg', 'Could not read your account. Please log in again.');
+    }
+
+    // Check the current password by signing in with it.
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email,
+      password: currentPass,
+    });
+
+    if (verifyError) {
+      return setModalMsg('pwMsg', 'Incorrect current password.');
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPass,
+    });
+
+    if (updateError) {
+      console.error('Failed to change password:', updateError);
+      return setModalMsg('pwMsg', `Failed to change password: ${updateError.message}`);
+    }
+
+    recordAudit('Settings', 'Password changed', 'Account password was changed.');
+    save();
+
+    setModalMsg('pwMsg', 'Password changed successfully!', true);
+    setTimeout(() => closeModal('passwordModal'), 1200);
+  } catch (error) {
+    console.error('Unexpected password change error:', error);
+    setModalMsg('pwMsg', 'Something went wrong while changing the password.');
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 });
