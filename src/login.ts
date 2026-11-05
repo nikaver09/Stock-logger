@@ -1,5 +1,6 @@
 import './login.css';
 import { enablePasswordToggles } from './password-toggle';
+import { supabase } from './supabase';
 
 enablePasswordToggles();
 
@@ -127,65 +128,116 @@ function recordAuthAudit(handledBy: string, action: string, description: string)
 }
 
 /* ── Cashier (employee) form ── */
+
+/* ── Supabase login ── */
+
+async function signInForRole(
+  role: 'admin' | 'employee',
+  usernameInputId: string,
+  passwordInputId: string,
+  messageId: string
+) {
+  const identifier = (
+    document.getElementById(usernameInputId) as HTMLInputElement
+  )?.value.trim();
+
+  const password = (
+    document.getElementById(passwordInputId) as HTMLInputElement
+  )?.value;
+
+  if (!identifier || !password) {
+    showError(messageId, 'Please enter your email and password.');
+    return;
+  }
+
+  // Supabase password authentication uses an email address.
+  if (!identifier.includes('@')) {
+    showError(messageId, 'Please use your registered email address.');
+    return;
+  }
+
+  const submitButton = document.querySelector<HTMLButtonElement>(
+    `#${role === 'admin' ? 'adminForm' : 'employeeForm'} button[type="submit"]`
+  );
+
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: identifier,
+      password,
+    });
+
+    if (error || !data.user) {
+      showError(messageId, 'Invalid email or password.');
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('username, role, active')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profileError || !profile || !profile.active) {
+      await supabase.auth.signOut();
+      showError(messageId, 'Your account is inactive or not configured.');
+      return;
+    }
+
+    if (profile.role !== role) {
+      await supabase.auth.signOut();
+      showError(
+        messageId,
+        `This account does not have the ${role} role.`
+      );
+      return;
+    }
+
+    clearError(messageId);
+
+    localStorage.setItem(
+      'wh-session',
+      JSON.stringify({
+        username: profile.username || data.user.email,
+        role: profile.role,
+      })
+    );
+
+    showLoader(
+      role === 'admin'
+        ? 'Authenticating as Admin...'
+        : 'Authenticating as Cashier...'
+    );
+
+    window.location.href = '/app.html';
+  } catch (error) {
+    console.error('Login error:', error);
+    showError(messageId, 'Unable to connect. Please try again.');
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
 document.getElementById('employeeForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  const usernameInput = document.getElementById('empUsername') as HTMLInputElement;
-  const passwordInput = document.getElementById('empPassword') as HTMLInputElement;
-  const username = usernameInput?.value.trim();
-  const password = passwordInput?.value;
-
-  if (!username || !password) {
-    showError('empMsg', 'Please enter both username and password.');
-    return;
-  }
-
-  const account = getUsers().find((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === username.toLowerCase());
-  const valid = !!account && account.active && account.role === 'employee' && account.password === password;
-  if (!valid) {
-    showError('empMsg', 'Invalid username or password.');
-    return;
-  }
-
-  clearError('empMsg');
-  recordAuthAudit(account.username, 'Signed in', 'Cashier signed in.');
-  localStorage.setItem('wh-session', JSON.stringify({ username: account.username, role: account.role }));
-  
-  showLoader('Authenticating as Cashier...');
-  setTimeout(() => {
-    window.location.href = '/app.html';
-  }, 600);
+  void signInForRole(
+    'employee',
+    'empUsername',
+    'empPassword',
+    'empMsg'
+  );
 });
 
-/* ── Admin form ── */
 document.getElementById('adminForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  const usernameInput = document.getElementById('adminUsername') as HTMLInputElement;
-  const passwordInput = document.getElementById('adminPassword') as HTMLInputElement;
-  const username = usernameInput?.value.trim();
-  const password = passwordInput?.value;
-
-  if (!username || !password) {
-    showError('adminMsg', 'Please enter both username and password.');
-    return;
-  }
-
-  const account = getUsers().find((user) => user.username.toLowerCase() === username.toLowerCase() || user.email.toLowerCase() === username.toLowerCase());
-  const valid = !!account && account.active && account.role === 'admin' && account.password === password;
-  if (!valid) {
-    showError('adminMsg', 'Invalid username or password.');
-    return;
-  }
-
-  clearError('adminMsg');
-  recordAuthAudit(account.username, 'Signed in', 'Admin signed in.');
-  localStorage.setItem('wh-session', JSON.stringify({ username: account.username, role: account.role }));
-  
-  showLoader('Authenticating as Admin...');
-  setTimeout(() => {
-    window.location.href = '/app.html';
-  }, 600);
+  void signInForRole(
+    'admin',
+    'adminUsername',
+    'adminPassword',
+    'adminMsg'
+  );
 });
-
 
 
 /* ── loading overlay ── */
@@ -235,63 +287,55 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && resetOverlay.classList.contains('open')) closeResetModal();
 });
 
-document.getElementById('confirmReset')?.addEventListener('click', () => {
-  const username = resetUsernameInput.value.trim();
 
-  if (!username) {
-    resetMsg.textContent = 'Please enter your username.';
+const confirmResetButton = document.getElementById('confirmReset') as HTMLButtonElement;
+
+confirmResetButton?.addEventListener('click', async () => {
+  const email = resetUsernameInput.value.trim();
+
+  if (!email) {
+    resetMsg.textContent = 'Please enter your registered email address.';
     resetMsg.className = 'reset-msg error';
     return;
   }
 
-  const creds = getCreds();
-  const users = getUsers();
-  const normalizedName = username.toLowerCase();
-  const account = users.find((user) => user.username.toLowerCase() === normalizedName || user.email.toLowerCase() === normalizedName);
-
-  // Reset either a managed account or a legacy built-in account.
-  let roleKey: 'admin' | 'employee' | null = account?.role ?? null;
-  if (!roleKey && (normalizedName === creds.admin.username.toLowerCase() || normalizedName === DEFAULT_CREDS.admin.username)) {
-    roleKey = 'admin';
-  } else if (!roleKey && (normalizedName === creds.employee.username.toLowerCase() || normalizedName === DEFAULT_CREDS.employee.username)) {
-    roleKey = 'employee';
-  }
-
-  if (!roleKey) {
-    resetMsg.textContent = 'Username not found.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    resetMsg.textContent = 'Please enter a valid email address.';
     resetMsg.className = 'reset-msg error';
-    resetUsernameInput.style.animation = 'none';
-    resetUsernameInput.offsetHeight;
-    resetUsernameInput.style.animation = 'shake 0.4s ease';
     return;
   }
 
-  // Reset password to default
-  const newPassword = DEFAULT_CREDS[roleKey].password;
-  if (account) {
-    account.password = newPassword;
-    localStorage.setItem('wh-users', JSON.stringify(users));
-    if (account.id === 'builtin-admin' || account.id === 'builtin-employee') {
-      const newCreds = { ...creds, [roleKey]: { ...creds[roleKey], username: account.username, password: newPassword } };
-      localStorage.setItem('wh-credentials', JSON.stringify(newCreds));
+  confirmResetButton.disabled = true;
+  confirmResetButton.textContent = 'Sending...';
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password.html`,
+    });
+
+    if (error) {
+      console.error('Password recovery error:', error);
+      resetMsg.textContent = 'Unable to send the reset email. Please try again.';
+      resetMsg.className = 'reset-msg error';
+      return;
     }
-  } else {
-    const newCreds = { ...creds, [roleKey]: { ...creds[roleKey], password: newPassword } };
-    localStorage.setItem('wh-credentials', JSON.stringify(newCreds));
+
+    resetStep1.style.display = 'none';
+    resetStep2.style.display = '';
+    resetSuccessInfo.textContent =
+      'If an account matches that email, you will receive a password recovery link. Please check your inbox and spam folder.';
+  } catch (error) {
+    console.error('Password recovery error:', error);
+    resetMsg.textContent = 'Unable to connect. Please try again.';
+    resetMsg.className = 'reset-msg error';
+  } finally {
+    confirmResetButton.disabled = false;
+    confirmResetButton.textContent = 'Reset';
   }
-  recordAuthAudit(account?.username ?? username, 'Password reset', 'Password reset to the default for this account.');
-
-  // Show success step
-  const defaultPass = newPassword;
-  resetSuccessInfo.innerHTML =
-    `New password: <strong>${defaultPass}</strong><br>` +
-    `Please change it after logging in.`;
-
-  resetStep1.style.display = 'none';
-  resetStep2.style.display = '';
 });
 
 document.getElementById('closeResetSuccess')?.addEventListener('click', closeResetModal);
+
 
 import * as THREE from 'three';
 

@@ -1,3 +1,4 @@
+
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
 import * as url from 'url'
@@ -14,6 +15,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         app: resolve(__dirname, 'app.html'),
+        resetPassword: resolve(__dirname, 'reset-password.html'),
       },
     },
   },
