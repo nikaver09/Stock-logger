@@ -1,33 +1,28 @@
-
 import { supabase } from './supabase';
 
 const resetPasswordForm = document.getElementById(
-  'resetPasswordForm'
+  'resetPasswordForm',
 ) as HTMLFormElement;
 
 const newPasswordInput = document.getElementById(
-  'newPassword'
+  'newPassword',
 ) as HTMLInputElement;
 
 const confirmPasswordInput = document.getElementById(
-  'confirmPassword'
+  'confirmPassword',
 ) as HTMLInputElement;
 
 const updatePasswordBtn = document.getElementById(
-  'updatePasswordBtn'
+  'updatePasswordBtn',
 ) as HTMLButtonElement;
 
 const resetMessage = document.getElementById(
-  'resetMessage'
+  'resetMessage',
 ) as HTMLParagraphElement;
 
-const successPanel = document.getElementById(
-  'successPanel'
-) as HTMLDivElement;
+const successPanel = document.getElementById('successPanel') as HTMLDivElement;
 
-const invalidPanel = document.getElementById(
-  'invalidPanel'
-) as HTMLDivElement;
+const invalidPanel = document.getElementById('invalidPanel') as HTMLDivElement;
 
 let recoverySessionReady = false;
 
@@ -111,15 +106,12 @@ resetPasswordForm.addEventListener('submit', async (event) => {
 
     resetPasswordForm.classList.add('hidden');
     successPanel.classList.remove('hidden');
-
   } catch (error) {
     console.error('Password recovery error:', error);
 
-    resetMessage.textContent =
-      'Unable to connect. Please try again.';
+    resetMessage.textContent = 'Unable to connect. Please try again.';
 
     resetMessage.className = 'message error';
-
   } finally {
     updatePasswordBtn.disabled = false;
     updatePasswordBtn.textContent = 'Update Password';
