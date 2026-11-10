@@ -1,31 +1,8 @@
+import './login.css';
 import { enablePasswordToggles } from './password-toggle';
+import { supabase } from './supabase';
 
 enablePasswordToggles();
-
-let signInPending = false;
-
-function setSignInPending(pending: boolean) {
-  signInPending = pending;
-  document
-    .querySelectorAll<HTMLButtonElement>(
-      '#employeeForm button[type="submit"], #adminForm button[type="submit"]',
-    )
-    .forEach((button) => {
-      button.disabled = pending;
-    });
-}
-
-function restoreLoginPage() {
-  setSignInPending(false);
-  document.getElementById('loadingOverlay')?.classList.add('hidden');
-}
-
-// Modules can initialize after window.load during hot reloads. The form is ready
-// as soon as its handlers are attached; it does not need a page-load timer.
-restoreLoginPage();
-window.addEventListener('pageshow', (event) => {
-  if (event.persisted) restoreLoginPage();
-});
 
 function showLoader(text: string) {
   const loader = document.getElementById('loadingOverlay');
@@ -40,8 +17,8 @@ function showError(msgId: string, text: string) {
   const msgEl = document.getElementById(msgId);
   if (msgEl) {
     msgEl.textContent = text;
-    msgEl.classList.add('error', 'visible');
-
+    msgEl.classList.add('error');
+    
     // Add a little shake effect (defined in CSS if needed, or just visual)
     msgEl.style.animation = 'none';
     msgEl.offsetHeight; // trigger reflow
@@ -53,18 +30,113 @@ function clearError(msgId: string) {
   const msgEl = document.getElementById(msgId);
   if (msgEl) {
     msgEl.textContent = '';
-    msgEl.classList.remove('error', 'visible');
+    msgEl.classList.remove('error');
   }
 }
+
+/* ── Credentials helper ── */
+const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
+  admin:    { username: 'admin',   password: 'admin123'    },
+  employee: { username: 'cashier', password: 'password123' },
+};
+type UserAccount = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean; password: string };
+
+function readUsers(fallback: UserAccount[]): UserAccount[] {
+  const stored = localStorage.getItem('wh-users');
+  if (stored === null) return fallback;
+  try {
+    const parsed = JSON.parse(stored) as Array<Partial<UserAccount> & { name?: string; pw?: string }>;
+    if (!Array.isArray(parsed)) return fallback;
+    const users = parsed.flatMap((value, index) => {
+      if (!value || typeof value !== 'object') return [];
+      const email = typeof value.email === 'string' ? value.email.trim() : '';
+      const username = typeof value.username === 'string' && value.username.trim() ? value.username.trim() : email.split('@')[0];
+      if (!username) return [];
+      const parts = typeof value.name === 'string' ? value.name.trim().split(/\s+/) : [];
+      let password = typeof value.password === 'string' ? value.password : typeof value.pw === 'string' ? value.pw : '';
+      if (typeof value.password !== 'string' && password) { try { password = atob(password); } catch { /* Keep an unencoded legacy value as-is. */ } }
+      return [{
+        id: typeof value.id === 'string' && value.id ? value.id : `migrated-${index}-${username.toLowerCase()}`,
+        username, role: value.role === 'admin' ? 'admin' as const : 'employee' as const,
+        firstName: typeof value.firstName === 'string' ? value.firstName : parts[0] ?? '',
+        lastName: typeof value.lastName === 'string' ? value.lastName : parts.slice(1).join(' '),
+        email, active: typeof value.active === 'boolean' ? value.active : true, password,
+      }];
+    });
+    if (!users.length) return fallback;
+    const canonical = JSON.stringify(users);
+    if (canonical !== stored) localStorage.setItem('wh-users', canonical);
+    return users;
+  } catch { return fallback; }
+}
+
+function getCreds(): Record<string, { username: string; password: string }> {
+  try {
+    const stored = JSON.parse(localStorage.getItem('wh-credentials') ?? 'null') as Partial<typeof DEFAULT_CREDS> | null;
+    return {
+      admin: typeof stored?.admin?.username === 'string' && typeof stored.admin.password === 'string' ? stored.admin : DEFAULT_CREDS.admin,
+      employee: typeof stored?.employee?.username === 'string' && typeof stored.employee.password === 'string' ? stored.employee : DEFAULT_CREDS.employee,
+    };
+  } catch {
+    return { ...DEFAULT_CREDS };
+  }
+}
+
+function getUsers(): UserAccount[] {
+  const creds = getCreds();
+  const builtinUsers: UserAccount[] = [
+    { id: 'builtin-admin', username: creds.admin?.username ?? 'admin', role: 'admin', firstName: 'System', lastName: 'Administrator', email: 'admin@example.com', active: true, password: creds.admin?.password ?? 'admin123' },
+    { id: 'builtin-employee', username: creds.employee?.username ?? 'cashier', role: 'employee', firstName: 'Store', lastName: 'Cashier', email: 'cashier@example.com', active: true, password: creds.employee?.password ?? 'password123' },
+  ];
+  const users = readUsers(builtinUsers);
+  for (const builtin of builtinUsers) {
+    const knownNames = [builtin.username, builtin.id === 'builtin-admin' ? DEFAULT_CREDS.admin.username : DEFAULT_CREDS.employee.username]
+      .map((name) => name.toLowerCase());
+    const index = users.findIndex((user) => user.id === builtin.id || knownNames.includes(user.username.toLowerCase()));
+    if (index < 0) {
+      users.push(builtin);
+      continue;
+    }
+
+    const existing = users[index];
+    users[index] = {
+      ...existing,
+      ...builtin,
+      // Keep an intentionally disabled built-in account disabled.
+      active: existing.active,
+      firstName: existing.firstName || builtin.firstName,
+      lastName: existing.lastName || builtin.lastName,
+      email: existing.email || builtin.email,
+    };
+  }
+  localStorage.setItem('wh-users', JSON.stringify(users));
+  return users;
+}
+
+function recordAuthAudit(handledBy: string, action: string, description: string) {
+  let entries: Array<Record<string, unknown>> = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem('wh-audit-logs') ?? '[]');
+    if (Array.isArray(stored)) entries = stored;
+  } catch { /* Start a clean audit trail if stored data is malformed. */ }
+  entries.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(), handledBy, module: 'Authentication', action, description,
+    ipAddress: 'Unavailable in local browser',
+  });
+  localStorage.setItem('wh-audit-logs', JSON.stringify(entries.slice(0, 1000)));
+}
+
+/* ── Cashier (employee) form ── */
+
+/* ── Supabase login ── */
 
 async function signInForRole(
   role: 'admin' | 'employee',
   usernameInputId: string,
   passwordInputId: string,
-  messageId: string,
+  messageId: string
 ) {
-  if (signInPending) return;
-
   const identifier = (
     document.getElementById(usernameInputId) as HTMLInputElement
   )?.value.trim();
@@ -84,21 +156,19 @@ async function signInForRole(
     return;
   }
 
-  setSignInPending(true);
+  const submitButton = document.querySelector<HTMLButtonElement>(
+    `#${role === 'admin' ? 'adminForm' : 'employeeForm'} button[type="submit"]`
+  );
+
+  if (submitButton) submitButton.disabled = true;
 
   try {
-    const { supabase } = await import('./supabase');
     const { data, error } = await supabase.auth.signInWithPassword({
       email: identifier,
       password,
     });
 
-    if (error) {
-      showError(messageId, authenticationErrorMessage(error));
-      return;
-    }
-
-    if (!data.user) {
+    if (error || !data.user) {
       showError(messageId, 'Invalid email or password.');
       return;
     }
@@ -117,13 +187,10 @@ async function signInForRole(
 
     if (profile.role !== role) {
       await supabase.auth.signOut();
-      const message =
-        profile.role === 'admin'
-          ? 'This is an Admin account. Select the Admin tab above and sign in again.'
-          : profile.role === 'employee'
-            ? 'This is a Cashier account. Select the Cashier tab above and sign in again.'
-            : 'Your account role is not configured. Please contact your administrator.';
-      showError(messageId, message);
+      showError(
+        messageId,
+        `This account does not have the ${role} role.`
+      );
       return;
     }
 
@@ -134,73 +201,66 @@ async function signInForRole(
       JSON.stringify({
         username: profile.username || data.user.email,
         role: profile.role,
-      }),
+      })
     );
 
     showLoader(
       role === 'admin'
         ? 'Authenticating as Admin...'
-        : 'Authenticating as Cashier...',
+        : 'Authenticating as Cashier...'
     );
 
     window.location.href = '/app.html';
   } catch (error) {
     console.error('Login error:', error);
-    document.getElementById('loadingOverlay')?.classList.add('hidden');
-    showError(messageId, authenticationErrorMessage(error));
+    showError(messageId, 'Unable to connect. Please try again.');
   } finally {
-    setSignInPending(false);
+    if (submitButton) submitButton.disabled = false;
   }
-}
-
-function authenticationErrorMessage(error: unknown): string {
-  const code =
-    typeof error === 'object' && error !== null && 'code' in error
-      ? error.code
-      : undefined;
-  if (code === 'invalid_credentials') return 'Invalid email or password.';
-  if (code === 'email_not_confirmed') {
-    return 'Please confirm your email address before signing in.';
-  }
-  if (
-    code === 'over_request_rate_limit' ||
-    code === 'over_email_send_rate_limit'
-  ) {
-    return 'Too many attempts. Please wait a few minutes and try again.';
-  }
-  if (
-    error instanceof Error &&
-    error.message.startsWith('Missing Supabase configuration.')
-  ) {
-    return 'Sign-in is not configured. Please contact your administrator.';
-  }
-  return 'Unable to connect. Please try again.';
 }
 
 document.getElementById('employeeForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  void signInForRole('employee', 'empUsername', 'empPassword', 'empMsg');
+  void signInForRole(
+    'employee',
+    'empUsername',
+    'empPassword',
+    'empMsg'
+  );
 });
 
 document.getElementById('adminForm')?.addEventListener('submit', (e) => {
   e.preventDefault();
-  void signInForRole('admin', 'adminUsername', 'adminPassword', 'adminMsg');
+  void signInForRole(
+    'admin',
+    'adminUsername',
+    'adminPassword',
+    'adminMsg'
+  );
 });
 
+
+/* ── loading overlay ── */
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) {
+      loader.classList.add('hidden');
+    }
+  }, 500);
+});
+
+/* ── Reset Password Modal ── */
 const resetOverlay = document.getElementById('resetModal') as HTMLElement;
-const resetStep1 = document.getElementById('resetStep1') as HTMLElement;
-const resetStep2 = document.getElementById('resetStep2') as HTMLElement;
-const resetUsernameInput = document.getElementById(
-  'resetUsername',
-) as HTMLInputElement;
-const resetMsg = document.getElementById('resetMsg') as HTMLElement;
-const resetSuccessInfo = document.getElementById(
-  'resetSuccessInfo',
-) as HTMLElement;
+const resetStep1   = document.getElementById('resetStep1') as HTMLElement;
+const resetStep2   = document.getElementById('resetStep2') as HTMLElement;
+const resetUsernameInput = document.getElementById('resetUsername') as HTMLInputElement;
+const resetMsg     = document.getElementById('resetMsg') as HTMLElement;
+const resetSuccessInfo = document.getElementById('resetSuccessInfo') as HTMLElement;
 
 function openResetModal() {
-  resetStep1.classList.remove('hidden');
-  resetStep2.classList.add('hidden');
+  resetStep1.style.display = '';
+  resetStep2.style.display = 'none';
   resetUsernameInput.value = '';
   resetMsg.textContent = '';
   resetMsg.className = 'reset-msg';
@@ -212,18 +272,10 @@ function closeResetModal() {
   resetOverlay.classList.remove('open');
 }
 
-document
-  .getElementById('forgotCashier')
-  ?.addEventListener('click', openResetModal);
-document
-  .getElementById('forgotAdmin')
-  ?.addEventListener('click', openResetModal);
-document
-  .getElementById('closeResetModal')
-  ?.addEventListener('click', closeResetModal);
-document
-  .getElementById('cancelResetModal')
-  ?.addEventListener('click', closeResetModal);
+document.getElementById('forgotCashier')?.addEventListener('click', openResetModal);
+document.getElementById('forgotAdmin')?.addEventListener('click', openResetModal);
+document.getElementById('closeResetModal')?.addEventListener('click', closeResetModal);
+document.getElementById('cancelResetModal')?.addEventListener('click', closeResetModal);
 
 // Close on backdrop click
 resetOverlay.addEventListener('click', (e) => {
@@ -232,16 +284,13 @@ resetOverlay.addEventListener('click', (e) => {
 
 // Close on Escape
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && resetOverlay.classList.contains('open'))
-    closeResetModal();
+  if (e.key === 'Escape' && resetOverlay.classList.contains('open')) closeResetModal();
 });
 
-const confirmResetButton = document.getElementById(
-  'confirmReset',
-) as HTMLButtonElement;
+
+const confirmResetButton = document.getElementById('confirmReset') as HTMLButtonElement;
 
 confirmResetButton?.addEventListener('click', async () => {
-  if (confirmResetButton.disabled) return;
   const email = resetUsernameInput.value.trim();
 
   if (!email) {
@@ -260,26 +309,24 @@ confirmResetButton?.addEventListener('click', async () => {
   confirmResetButton.textContent = 'Sending...';
 
   try {
-    const { supabase } = await import('./supabase');
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password.html`,
     });
 
     if (error) {
       console.error('Password recovery error:', error);
-      resetMsg.textContent =
-        'Unable to send the reset email. Please try again.';
+      resetMsg.textContent = 'Unable to send the reset email. Please try again.';
       resetMsg.className = 'reset-msg error';
       return;
     }
 
-    resetStep1.classList.add('hidden');
-    resetStep2.classList.remove('hidden');
+    resetStep1.style.display = 'none';
+    resetStep2.style.display = '';
     resetSuccessInfo.textContent =
       'If an account matches that email, you will receive a password recovery link. Please check your inbox and spam folder.';
   } catch (error) {
     console.error('Password recovery error:', error);
-    resetMsg.textContent = authenticationErrorMessage(error);
+    resetMsg.textContent = 'Unable to connect. Please try again.';
     resetMsg.className = 'reset-msg error';
   } finally {
     confirmResetButton.disabled = false;
@@ -287,52 +334,113 @@ confirmResetButton?.addEventListener('click', async () => {
   }
 });
 
-document
-  .getElementById('closeResetSuccess')
-  ?.addEventListener('click', closeResetModal);
+document.getElementById('closeResetSuccess')?.addEventListener('click', closeResetModal);
 
-/* ── Tab switching ── */
-const tabs = {
-  cashier: {
-    btn: document.getElementById('tabCashier'),
-    panel: document.getElementById('panelCashier'),
-  },
-  admin: {
-    btn: document.getElementById('tabAdmin'),
-    panel: document.getElementById('panelAdmin'),
-  },
-};
 
-function switchTab(active: 'cashier' | 'admin', updateHash = true) {
-  Object.entries(tabs).forEach(([key, { btn, panel }]) => {
-    const isActive = key === active;
-    if (isActive) {
-      btn?.classList.add('active');
-      panel?.classList.remove('panel-hidden');
-    } else {
-      btn?.classList.remove('active');
-      panel?.classList.add('panel-hidden');
+import * as THREE from 'three';
+
+// --- 3D Background Mosaic Tiles ---
+function init3DBackground() {
+  const canvas = document.getElementById('bg-canvas') as HTMLCanvasElement;
+  if (!canvas) return;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  
+  const scene = new THREE.Scene();
+
+  // Create an isometric camera
+  const aspect = window.innerWidth / window.innerHeight;
+  const d = 25;
+  const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+  camera.position.set(30, 30, 30);
+  camera.lookAt(scene.position);
+
+  // Lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+  
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(10, 20, 10);
+  scene.add(dirLight);
+
+  // Blue accent point light
+  const pointLight = new THREE.PointLight(0x3b82f6, 500, 150);
+  pointLight.position.set(0, 15, 0);
+  scene.add(pointLight);
+
+  // Instanced mesh for tiles
+  const gridSize = 35; // 35x35 grid
+  const boxSize = 1.95;
+  const geometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+  
+  // Metallic material with #999999 color
+  const material = new THREE.MeshStandardMaterial({ 
+    color: 0x999999, 
+    roughness: 0.1, 
+    metalness: 0.8 
+  });
+  
+  const mesh = new THREE.InstancedMesh(geometry, material, gridSize * gridSize);
+  
+  const dummy = new THREE.Object3D();
+  let idx = 0;
+  const offset = (gridSize * 2) / 2;
+  
+  for (let x = 0; x < gridSize; x++) {
+    for (let z = 0; z < gridSize; z++) {
+      const posX = x * 2 - offset;
+      const posZ = z * 2 - offset;
+      dummy.position.set(posX, 0, posZ);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(idx++, dummy.matrix);
     }
-    btn?.setAttribute('aria-selected', String(isActive));
-  });
-  if (updateHash && window.location.hash !== `#${active}`) {
-    window.location.hash = active;
   }
-}
+  scene.add(mesh);
 
-tabs.cashier.btn?.addEventListener('click', () => switchTab('cashier'));
-tabs.admin.btn?.addEventListener('click', () => switchTab('admin'));
+  // Animation loop
+  const clock = new THREE.Clock();
+  function animate() {
+    requestAnimationFrame(animate);
+    const time = clock.getElapsedTime();
+    
+    // Animate tiles in a gentle wave pattern
+    let i = 0;
+    for (let x = 0; x < gridSize; x++) {
+      for (let z = 0; z < gridSize; z++) {
+        const posX = x * 2 - offset;
+        const posZ = z * 2 - offset;
+        
+        // sine wave math
+        const y = Math.sin(posX * 0.15 + time * 0.8) * Math.cos(posZ * 0.15 + time * 0.8) * 2;
+        
+        dummy.position.set(posX, y, posZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i++, dummy.matrix);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    
+    // Slow rotation of the scene for a dynamic feel
+    scene.rotation.y = time * 0.03;
 
-function restoreSelectedTab() {
-  switchTab(window.location.hash === '#admin' ? 'admin' : 'cashier', false);
-}
+    renderer.render(scene, camera);
+  }
+  
+  animate();
 
-restoreSelectedTab();
-window.addEventListener('hashchange', restoreSelectedTab);
-
-// Initialize the decoration independently so authentication controls are ready first.
-void import('./login-background')
-  .then(({ initLoginBackground }) => initLoginBackground())
-  .catch((error: unknown) => {
-    console.error('The sign-in rack could not be initialized:', error);
+  // Resize handler
+  window.addEventListener('resize', () => {
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.left = -d * aspect;
+    camera.right = d * aspect;
+    camera.top = d;
+    camera.bottom = -d;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
+}
+
+init3DBackground();
+

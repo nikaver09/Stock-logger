@@ -1,12 +1,15 @@
-import { defineConfig } from 'vite';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import tailwindcss from '@tailwindcss/vite';
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
+import { defineConfig } from 'vite'
+import { resolve } from 'path'
+import * as url from 'url'
+import tailwindcss from '@tailwindcss/vite'
+
+const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
-  plugins: [tailwindcss()],
+  plugins: [
+    tailwindcss(),
+  ],
   build: {
     rollupOptions: {
       input: {
@@ -16,4 +19,4 @@ export default defineConfig({
       },
     },
   },
-});
+})
