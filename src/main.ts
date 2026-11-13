@@ -3,47 +3,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { enablePasswordToggles } from './password-toggle';
 import './style.css';
 import { supabase } from './supabase';
+import { isAdmin } from './access';
 
 enablePasswordToggles();
 
 
-/* ---------- auth guard ---------- */
-(async function checkAuth() {
-  try {
-    const { data, error } = await supabase.auth.getSession();
-
-    if (error || !data.session) {
-      localStorage.removeItem('wh-session');
-      window.location.replace('/');
-      return;
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('username, role, active')
-      .eq('id', data.session.user.id)
-      .single();
-
-    if (profileError || !profile || !profile.active) {
-      await supabase.auth.signOut();
-      localStorage.removeItem('wh-session');
-      window.location.replace('/');
-      return;
-    }
-
-    localStorage.setItem(
-      'wh-session',
-      JSON.stringify({
-        username: profile.username,
-        role: profile.role,
-      })
-    );
-  } catch (error) {
-    console.error('Authentication check failed:', error);
-    localStorage.removeItem('wh-session');
-    window.location.replace('/');
-  }
-})();
+// app.ts verifies the active account and configures access before loading this module.
 
 type Item = { sku: string; name: string; qty: number; slot: number; price?: number };
 type Log = { id: number; time: string; sku: string; type: 'IN' | 'OUT'; qty: number; note: string };
@@ -71,7 +36,7 @@ type ReturnEntry = {
   time: string;
 };
 
-type User = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean; password: string };
+type User = { id: string; username: string; role: 'admin' | 'employee'; firstName: string; lastName: string; email: string; active: boolean };
 type Supplier = { id: string; name: string; contactPerson: string; phone: string; email: string; address: string; active: boolean };
 type Category = { id: string; name: string };
 type AuditEntry = { id: string; createdAt: string; handledBy: string; module: string; action: string; description: string; ipAddress: string };
@@ -83,10 +48,6 @@ type Delivery = {
 };
 const DELIVERY_STATUSES: DeliveryStatus[] = ['Pending', 'Scheduled', 'Out for delivery', 'Delivered', 'Cancelled'];
 
-const DEFAULT_CREDS: Record<string, { username: string; password: string }> = {
-  admin: { username: 'admin', password: 'admin123' },
-  employee: { username: 'cashier', password: 'password123' },
-};
 
 const COLS = 4, LEVELS = 3, SLOTS = COLS * LEVELS, LOW = 10, CAP = 200;
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
@@ -170,48 +131,8 @@ const seed: Item[] = [
 function load<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? '') as T; } catch { return fallback; }
 }
-function readUsers(fallback: User[]): User[] {
-  const stored = localStorage.getItem('wh-users');
-  if (stored === null) return fallback;
-  try {
-    const parsed = JSON.parse(stored) as Array<Partial<User> & { name?: string; pw?: string }>;
-    if (!Array.isArray(parsed)) return fallback;
-    const users = parsed.flatMap((value, index) => {
-      if (!value || typeof value !== 'object') return [];
-      const email = typeof value.email === 'string' ? value.email.trim() : '';
-      const username = typeof value.username === 'string' && value.username.trim() ? value.username.trim() : email.split('@')[0];
-      if (!username) return [];
-      const parts = typeof value.name === 'string' ? value.name.trim().split(/\s+/) : [];
-      let password = typeof value.password === 'string' ? value.password : typeof value.pw === 'string' ? value.pw : '';
-      if (typeof value.password !== 'string' && password) { try { password = atob(password); } catch { /* Keep an unencoded legacy value as-is. */ } }
-      return [{
-        id: typeof value.id === 'string' && value.id ? value.id : `migrated-${index}-${username.toLowerCase()}`,
-        username, role: value.role === 'admin' ? 'admin' as const : 'employee' as const,
-        firstName: typeof value.firstName === 'string' ? value.firstName : parts[0] ?? '',
-        lastName: typeof value.lastName === 'string' ? value.lastName : parts.slice(1).join(' '),
-        email, active: typeof value.active === 'boolean' ? value.active : true, password,
-      }];
-    });
-    if (!users.length) return fallback;
-    const canonical = JSON.stringify(users);
-    if (canonical !== stored) localStorage.setItem('wh-users', canonical);
-    return users;
-  } catch { return fallback; }
-}
-function loadCreds(): Record<string, { username: string; password: string }> {
-  try {
-    const stored = JSON.parse(localStorage.getItem('wh-credentials') ?? 'null') as Partial<typeof DEFAULT_CREDS> | null;
-    return {
-      admin: typeof stored?.admin?.username === 'string' && typeof stored.admin.password === 'string' ? stored.admin : DEFAULT_CREDS.admin,
-      employee: typeof stored?.employee?.username === 'string' && typeof stored.employee.password === 'string' ? stored.employee : DEFAULT_CREDS.employee,
-    };
-  } catch { return { ...DEFAULT_CREDS }; }
-}
-const initialCreds = loadCreds();
-let users: User[] = readUsers([
-  { id: 'builtin-admin', username: initialCreds.admin?.username ?? 'admin', role: 'admin', firstName: 'System', lastName: 'Administrator', email: 'admin@example.com', active: true, password: initialCreds.admin?.password ?? 'admin123' },
-  { id: 'builtin-employee', username: initialCreds.employee?.username ?? 'cashier', role: 'employee', firstName: 'Store', lastName: 'Cashier', email: 'cashier@example.com', active: true, password: initialCreds.employee?.password ?? 'password123' },
-]);
+// User management reads verified Supabase profiles, never demo passwords.
+let users: User[] = [];
 let items: Item[] = load('wh-items', seed);
 
 
@@ -460,6 +381,7 @@ async function loadCategoriesFromSupabase() {
 }
 
 async function loadAuditLogsFromSupabase() {
+  if (!isAdmin()) return;
   const { data, error } = await supabase
     .from('audit_logs')
     .select('id, user_id, module, action, description, created_at')
@@ -499,6 +421,7 @@ async function loadAuditLogsFromSupabase() {
 }
 
 async function loadUsersFromSupabase() {
+  if (!isAdmin()) return;
   const { data, error } = await supabase
     .from('profiles')
     .select('id, username, email, first_name, last_name, role, active')
@@ -517,7 +440,6 @@ async function loadUsersFromSupabase() {
     lastName: row.last_name ?? '',
     email: row.email ?? '',
     active: row.active ?? true,
-    password: '',
   }));
 
   renderUsers();
@@ -536,7 +458,7 @@ let categories: Category[] = load('wh-categories', [
   { id: 'category-others', name: 'Others' },
   { id: 'category-computer-parts', name: 'Computer Parts' },
 ]);
-const storedAuditEntries = load<unknown>('wh-audit-logs', []);
+const storedAuditEntries = isAdmin() ? load<unknown>('wh-audit-logs', []) : [];
 let auditEntries: AuditEntry[] = Array.isArray(storedAuditEntries)
   ? storedAuditEntries.filter((entry): entry is AuditEntry => !!entry && typeof entry === 'object'
     && typeof entry.id === 'string' && typeof entry.createdAt === 'string' && typeof entry.handledBy === 'string'
@@ -548,22 +470,24 @@ const save = () => {
   localStorage.setItem('wh-items', JSON.stringify(items));
   localStorage.setItem('wh-sales', JSON.stringify(sales));
   localStorage.setItem('wh-returns', JSON.stringify(returnEntries));
-  localStorage.setItem('wh-users', JSON.stringify(users));
+  if (isAdmin()) localStorage.setItem('wh-users', JSON.stringify(users));
   localStorage.setItem('wh-suppliers', JSON.stringify(suppliers));
   localStorage.setItem('wh-categories', JSON.stringify(categories));
-  localStorage.setItem('wh-audit-logs', JSON.stringify(auditEntries));
+  if (isAdmin()) localStorage.setItem('wh-audit-logs', JSON.stringify(auditEntries));
 };
 
 function recordAudit(module: string, action: string, description: string, handledBy?: string) {
   const session = getSession();
-  auditEntries.unshift({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: new Date().toISOString(),
-    handledBy: handledBy ?? session?.username ?? 'System',
-    module, action, description, ipAddress: 'Unavailable in local browser',
-  });
-  auditEntries = auditEntries.slice(0, 1000);
-  renderAuditLogs();
+  if (isAdmin()) {
+    auditEntries.unshift({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      handledBy: handledBy ?? session?.username ?? 'System',
+      module, action, description, ipAddress: 'Unavailable in local browser',
+    });
+    auditEntries = auditEntries.slice(0, 1000);
+    renderAuditLogs();
+  }
 
   // Save a copy to Supabase in the background.
   void (async () => {
@@ -907,6 +831,7 @@ let userSort: { field: keyof Pick<User, 'username' | 'role' | 'email' | 'lastNam
 let userPage = 1;
 const USERS_PER_PAGE = 10;
 function renderUsers() {
+  if (!isAdmin()) return;
   const table = $('#usersTable');
   if (!table) return;
   const search = ($<HTMLInputElement>('#userSearch')?.value ?? '').trim().toLowerCase();
@@ -1015,6 +940,7 @@ const auditDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 };
 function renderAuditLogs() {
+  if (!isAdmin()) return;
   const table = $('#auditTable');
   if (!table) return;
   const moduleFilter = ($<HTMLInputElement>('#auditSearch')?.value ?? '').trim().toLowerCase();
@@ -1470,6 +1396,7 @@ $<HTMLFormElement>('#categoryForm')?.addEventListener('submit', async (event) =>
 
 
 function openUserEditor(user?: User) {
+  if (!isAdmin()) return;
   const form = $<HTMLFormElement>('#userForm');
   form.reset();
   $<HTMLInputElement>('#userId').value = user?.id ?? '';
@@ -1495,6 +1422,7 @@ $('#closeUserModal')?.addEventListener('click', () => closeModal('userModal'));
 $('#cancelUserModal')?.addEventListener('click', () => closeModal('userModal'));
 $('#userModal')?.addEventListener('click', (event) => { if ((event.target as HTMLElement).id === 'userModal') closeModal('userModal'); });
 $('#usersTable')?.addEventListener('click', (event) => {
+  if (!isAdmin()) return;
   const target = event.target as HTMLElement;
   const sort = target.closest<HTMLButtonElement>('[data-user-sort]');
   if (sort) {
@@ -1528,6 +1456,7 @@ $('#usersPagination')?.addEventListener('click', (event) => {
 });
 
 $<HTMLFormElement>('#userForm')?.addEventListener('submit', async (event) => {
+  if (!isAdmin()) return;
   event.preventDefault();
 
   const id = $<HTMLInputElement>('#userId').value;
@@ -2193,33 +2122,27 @@ void loadDeliveriesFromSupabase();
 renderUI();
 resize();
 
-/* ---------- Loading Overlay ---------- */
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    const loader = $('#loadingOverlay');
-    if (loader) {
-      loader.classList.add('hidden');
-      setTimeout(() => loader.remove(), 600); // clean up DOM
-    }
-  }, 800);
-});
-
+// This module loads after authentication and may run after window.load.
+$('#loadingOverlay')?.classList.add('hidden');
 
 /* ---------- Logout ---------- */
 $('#logoutBtn')?.addEventListener('click', async () => {
-  recordAudit('Authentication', 'Signed out', 'User signed out.');
-  save();
-
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
+  const button = $<HTMLButtonElement>('#logoutBtn');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    localStorage.removeItem('wh-session');
+    localStorage.removeItem('wh-users');
+    localStorage.removeItem('wh-audit-logs');
+    window.location.replace('/');
+  } catch (error) {
     console.error('Supabase sign-out failed:', error);
+    alert('Unable to sign out. Please check your connection and try again.');
+    button.disabled = false;
   }
-
-  localStorage.removeItem('wh-session');
-  window.location.replace('/');
 });
-
 
 /* ---------- Footer Nav Submenus ---------- */
 document.querySelectorAll<HTMLButtonElement>('.nav-item.has-submenu').forEach((btn) => {
@@ -2281,7 +2204,11 @@ const salesNavGroup = $('#salesNavGroup');
 const inventoryNavGroup = $('#inventoryNavGroup');
 
 function switchView(view: 'dashboard' | 'movement' | 'categories' | 'settings' | 'sales' | 'deliveries' | 'suppliers' | 'auditLogs' | 'users') {
-  if (!dashboardView || !movementView || !settingsView || !salesView || !suppliersView || !categoriesView || !auditLogsView || !usersView || !navDashboard || !navSettings) return;
+  if (!isAdmin() && (view === 'users' || view === 'auditLogs')) {
+    view = 'dashboard';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  if (!dashboardView || !movementView || !settingsView || !salesView || !suppliersView || !categoriesView || !navDashboard || !navSettings) return;
   dashboardView.style.display = view === 'dashboard' ? '' : 'none';
   movementView.style.display = view === 'movement' ? '' : 'none';
   settingsView.style.display = view === 'settings' ? 'block' : 'none';
@@ -2289,8 +2216,8 @@ function switchView(view: 'dashboard' | 'movement' | 'categories' | 'settings' |
   if (deliveriesView) deliveriesView.style.display = view === 'deliveries' ? '' : 'none';
   suppliersView.style.display = view === 'suppliers' ? '' : 'none';
   categoriesView.style.display = view === 'categories' ? '' : 'none';
-  auditLogsView.style.display = view === 'auditLogs' ? '' : 'none';
-  usersView.style.display = view === 'users' ? '' : 'none';
+  if (auditLogsView) auditLogsView.style.display = view === 'auditLogs' ? '' : 'none';
+  if (usersView) usersView.style.display = view === 'users' ? '' : 'none';
   navDashboard.classList.toggle('active', view === 'dashboard');
   navSettings.classList.toggle('active', view === 'settings');
   navSuppliers?.classList.toggle('active', view === 'suppliers');
@@ -2306,7 +2233,7 @@ function switchView(view: 'dashboard' | 'movement' | 'categories' | 'settings' |
     const settingUser = $<HTMLElement>('#settingUser');
     const settingRole = $<HTMLElement>('#settingRole');
     if (settingUser && session?.username) settingUser.textContent = session.username;
-    if (settingRole && session?.role)     settingRole.textContent = session.role;
+    if (settingRole && session?.role)     settingRole.textContent = isAdmin() ? 'Admin' : 'Cashier';
 
     // Populate password (masked by default)
     // Password is never readable (Supabase stores it hashed). Always show dots.
@@ -2434,15 +2361,6 @@ function checkInitialHash() {
 window.addEventListener('hashchange', checkInitialHash);
 checkInitialHash();
 
-function saveCreds(creds: Record<string, { username: string; password: string }>) {
-  localStorage.setItem('wh-credentials', JSON.stringify(creds));
-  users = users.map((user) => user.id === 'builtin-admin' && creds.admin
-    ? { ...user, username: creds.admin.username, password: creds.admin.password }
-    : user.id === 'builtin-employee' && creds.employee
-      ? { ...user, username: creds.employee.username, password: creds.employee.password }
-      : user);
-  save();
-}
 function getSession(): { username: string; role: string } | null {
   try { return JSON.parse(localStorage.getItem('wh-session') ?? 'null'); } catch { return null; }
 }

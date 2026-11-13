@@ -36,11 +36,14 @@ async function startApp(): Promise<void> {
     }),
   );
 
+  localStorage.removeItem('wh-credentials');
+  localStorage.removeItem('wh-users');
   configureAccess(profile.role);
   await import('./main');
 }
 
 void startApp().catch((error: unknown) => {
+  localStorage.removeItem('wh-session');
   console.error('Dashboard initialization failed:', error);
   const message = document.querySelector('#loadingOverlay .loading-text');
   if (message) {

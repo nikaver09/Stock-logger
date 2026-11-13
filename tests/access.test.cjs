@@ -106,11 +106,13 @@ for (const role of ['admin', 'employee']) {
         'movementView',
         'settingsView',
         'salesView',
+        'deliveriesView',
         'suppliersView',
         'categoriesView',
         'navDashboard',
         'navSettings',
         'navSuppliers',
+        'navDeliveries',
         'navAuditLogs',
         'navUsers',
         'salesNavGroup',
@@ -159,3 +161,10 @@ for (const role of ['admin', 'employee']) {
     });
   }
 }
+
+// Exercise the actual page entry point so role checks cannot be bypassed at startup.
+test('dashboard entry verifies roles before loading dashboard controls', () => {
+  const html = readFileSync('app.html', 'utf8');
+  assert.match(html, /<script type="module" src="\/src\/app\.ts"><\/script>/);
+  assert.doesNotMatch(html, /<script[^>]*src="\/src\/main\.ts"/);
+});

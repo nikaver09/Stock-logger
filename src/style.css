@@ -1084,3 +1084,8 @@ tbody tr.pick:hover { background: var(--accent-soft); }
   .inventory-products { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .delivery-modal .user-form-grid { grid-template-columns: 1fr; }
 }
+
+/* Keep restricted controls hidden until the verified profile grants access. */
+html:not([data-admin-access]) [data-admin-only] {
+  display: none !important;
+}

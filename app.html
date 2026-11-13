@@ -279,7 +279,7 @@
           </section>
         </div>
 
-        <div id="auditLogsView" style="display: none;">
+        <div id="auditLogsView" data-admin-only style="display: none;">
           <header class="users-header audit-header">
             <div class="users-title"><span class="users-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg></span><h1>Audit Logs</h1></div>
           </header>
@@ -290,7 +290,7 @@
           </section>
         </div>
 
-        <div id="usersView" style="display: none;">
+        <div id="usersView" data-admin-only style="display: none;">
           <header class="users-header">
             <div class="users-title"><span class="users-title-icon" aria-hidden="true">♙</span><h1>Users</h1></div>
             <button type="button" class="users-add-button" id="addUserButton"><span aria-hidden="true">＋</span> Add user</button>
@@ -404,7 +404,7 @@
           </div>
         </div>
 
-        <div id="auditDetailModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="auditDetailTitle">
+        <div id="auditDetailModal" data-admin-only class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="auditDetailTitle">
           <div class="settings-modal audit-detail-modal">
             <button class="settings-modal-close" id="closeAuditDetail" type="button" aria-label="Close">×</button>
             <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg></div>
@@ -414,7 +414,7 @@
           </div>
         </div>
 
-        <div id="userModal" class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
+        <div id="userModal" data-admin-only class="settings-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
           <div class="settings-modal user-modal">
             <button class="settings-modal-close" id="closeUserModal" type="button" aria-label="Close">×</button>
             <div class="smodal-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -591,7 +591,7 @@
           <span class="nav-label">Suppliers</span>
         </a>
 
-        <a href="#audit-logs" class="nav-item" id="navAuditLogs">
+        <a href="#audit-logs" class="nav-item" id="navAuditLogs" data-admin-only>
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -603,7 +603,7 @@
           <span class="nav-label">Audit Logs</span>
         </a>
 
-        <a href="#users" class="nav-item" id="navUsers">
+        <a href="#users" class="nav-item" id="navUsers" data-admin-only>
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -624,7 +624,7 @@
       </nav>
     </footer>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/app.ts"></script>
 </body>
 
 </html>

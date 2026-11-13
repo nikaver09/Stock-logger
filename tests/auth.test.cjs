@@ -470,3 +470,30 @@ test('login styles are linked in the document head before scripts initialize', (
     /<link rel="stylesheet" href="\/src\/login\.css"/,
   );
 });
+
+for (const profile of [
+  { username: 'admin', role: 'admin', active: true },
+  { username: 'cashier', role: 'employee', active: false },
+  null,
+]) {
+  test(`cashier login rejects an unauthorized profile: ${JSON.stringify(profile)}`, async () => {
+    let signedOut = false;
+    const login = loginHarness({
+      loadAuth: () => ({
+        auth: {
+          signInWithPassword: async () => ({ data: { user: { id: 'user-1' } }, error: null }),
+          signOut: async () => { signedOut = true; return { error: null }; },
+        },
+        from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: profile, error: null }) }) }) }),
+      }),
+    });
+    login.get('empUsername').value = 'cashier@example.com';
+    login.get('empPassword').value = 'test-password';
+    login.submit('employeeForm');
+    await settle();
+    assert.equal(signedOut, true);
+    assert.equal(login.location.href, '');
+    assert.equal(login.storage.has('wh-session'), false);
+    assert.equal(login.buttons.every((button) => !button.disabled), true);
+  });
+}

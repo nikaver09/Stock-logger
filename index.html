@@ -43,12 +43,82 @@
       overflow: hidden;
     }
 
-    /* 3D Background Canvas */
-    #bg-canvas {
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-    }
+body {
+  justify-content: flex-start;
+  overflow: auto;
+  overflow-x: hidden;
+  padding: 48px max(32px, calc((100vw - 1120px) / 2));
+}
+
+/* The rack occupies the right half while the form stays clear and readable. */
+.rack-backdrop {
+  position: fixed;
+  inset: 0 0 0 46%;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at center, #e0ddd7 0%, transparent 68%);
+}
+.rack-stage {
+  width: min(100%, 620px);
+  padding: 24px 40px;
+}
+.rack-svg {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  overflow: visible;
+  filter: drop-shadow(0 24px 16px rgb(40 35 28 / 9%));
+}
+.rack-solid polygon {
+  stroke: #67645e;
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+.rack-side {
+  fill: #9d9991;
+}
+.rack-front {
+  fill: #c3bfb7;
+}
+.rack-top {
+  fill: #e4e0d9;
+}
+.rack-unit .rack-front {
+  fill: #eeebe5;
+}
+.rack-unit .rack-side {
+  fill: #b5b0a7;
+}
+.rack-unit .rack-top {
+  fill: #f7f5f0;
+}
+.rack-unit.is-selected .rack-front {
+  fill: #dbe6db;
+}
+.rack-unit.is-selected polygon {
+  stroke: #000000ff;
+}
+.rack-led {
+  fill: #ffffffff;
+}
+.rack-led.is-on {
+  fill: #000000ff;
+}
+
+@media (max-width: 760px) {
+  body {
+    justify-content: center;
+    padding: 48px 16px;
+  }
+  .rack-backdrop {
+    display: none;
+  }
+  .auth-card {
+    padding: 0;
+  }
+}
+
+
 
     /* Loading overlay */
     .loading-overlay {
@@ -439,11 +509,16 @@
       z-index: 2;
     }
   </style>
+  <link rel="stylesheet" href="/src/login.css" />
 </head>
 <body>
 
-  <!-- 3D Background Canvas -->
-  <canvas id="bg-canvas"></canvas>
+  <!-- Animated drawer background -->
+  <div class="rack-backdrop" aria-hidden="true">
+    <div id="login-rack" class="rack-stage">
+      <svg class="rack-svg" viewBox="0 0 400 440"></svg>
+    </div>
+  </div>
 
   <!-- Loading overlay -->
   <div id="loadingOverlay" class="loading-overlay hidden">
@@ -485,7 +560,7 @@
           <div class="form-group">
             <div class="input-wrap">
               <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              <input type="text" id="empUsername" class="auth-input" placeholder="Username" required autocomplete="username" />
+              <input type="email" id="empUsername" class="auth-input" placeholder="Email address" required autocomplete="email" />
             </div>
           </div>
           <div class="form-group">
@@ -511,7 +586,7 @@
           <div class="form-group">
             <div class="input-wrap">
               <svg class="input-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              <input type="text" id="adminUsername" class="auth-input" placeholder="Admin Username" required autocomplete="username" />
+              <input type="email" id="adminUsername" class="auth-input" placeholder="Admin email address" required autocomplete="email" />
             </div>
           </div>
           <div class="form-group">
@@ -573,59 +648,6 @@
     </div>
   </div>
 
-  <script>
-    /* ── Tab switching ── */
-    const tabs = {
-      cashier: { btn: document.getElementById('tabCashier'), panel: document.getElementById('panelCashier') },
-      admin:   { btn: document.getElementById('tabAdmin'),   panel: document.getElementById('panelAdmin') },
-    };
-
-    function switchTab(active) {
-      Object.entries(tabs).forEach(([key, { btn, panel }]) => {
-        const isActive = key === active;
-        if (isActive) {
-          btn.classList.add('active');
-          panel.classList.remove('panel-hidden');
-        } else {
-          btn.classList.remove('active');
-          panel.classList.add('panel-hidden');
-        }
-        btn.setAttribute('aria-selected', String(isActive));
-      });
-    }
-
-    tabs.cashier.btn.addEventListener('click', () => switchTab('cashier'));
-    tabs.admin.btn.addEventListener('click',   () => switchTab('admin'));
-
-    // Observe modal open class
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class') {
-          const resetOverlay = document.getElementById('resetModal');
-          // Already handled by CSS .open class
-        }
-      });
-    });
-    observer.observe(document.getElementById('resetModal'), { attributes: true });
-
-    // Patch error messages to toggle visibility
-    const patchMsg = (id) => {
-      const el = document.getElementById(id);
-      if(!el) return;
-      const obs = new MutationObserver(() => {
-        if(el.textContent.trim() !== '') {
-          el.classList.add('visible');
-        } else {
-          el.classList.remove('visible');
-        }
-      });
-      obs.observe(el, { childList: true, characterData: true, subtree: true });
-    };
-    patchMsg('empMsg');
-    patchMsg('adminMsg');
-    patchMsg('resetMsg');
-  </script>
-
-  <script type="module" src="/src/login.ts"></script>
+<script type="module" src="/src/login.ts"></script>
 </body>
 </html>
