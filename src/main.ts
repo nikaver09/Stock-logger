@@ -1403,7 +1403,7 @@ $('#addUserButton')?.addEventListener('click', () => openUserEditor());
 $('#closeUserModal')?.addEventListener('click', () => closeModal('userModal'));
 $('#cancelUserModal')?.addEventListener('click', () => closeModal('userModal'));
 $('#userModal')?.addEventListener('click', (event) => { if ((event.target as HTMLElement).id === 'userModal') closeModal('userModal'); });
-$('#usersTable')?.addEventListener('click', (event) => {
+$('#usersTable')?.addEventListener('click', async (event) => {
   if (!isAdmin()) return;
   const target = event.target as HTMLElement;
   const sort = target.closest<HTMLButtonElement>('[data-user-sort]');
@@ -1422,10 +1422,58 @@ $('#usersTable')?.addEventListener('click', (event) => {
     const user = users.find((entry) => entry.id === remove.dataset.deleteUser);
     if (!user) return;
     const message = $('#usersMessage');
-    message.textContent = getSession()?.username === user.username
-      ? 'You cannot delete the account you are currently using.'
-      : `Users can't be deleted from the app. Set ${user.username} to Inactive to block access, or remove the account in Supabase (Authentication → Users).`;
-    message.className = 'users-message err';
+    const show = (text: string, ok = false) => {
+      message.textContent = text;
+      message.className = `users-message ${ok ? 'ok' : 'err'}`;
+    };
+    if (getSession()?.username === user.username) {
+      show('You cannot delete the account you are currently using.');
+      return;
+    }
+    if (user.active) {
+      show('Set this account to Inactive and save before permanently deleting it.');
+      return;
+    }
+    if (!window.confirm(`Permanently delete ${user.username}? This cannot be undone. Accounts with warehouse history cannot be deleted.`)) return;
+    remove.disabled = true;
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        show('Your session has expired. Sign in again.');
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('delete-user', {
+        body: { userId: user.id },
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+      });
+      if (error || data?.error) {
+        let detail = typeof data?.error === 'string' ? data.error : error?.message ?? 'Unknown error';
+        const response = error && 'context' in error ? error.context : null;
+        if (response instanceof Response) {
+          try {
+            const payload = await response.clone().json();
+            if (typeof payload?.error === 'string') detail = payload.error;
+          } catch { /* Preserve SDK error when no JSON response is available. */ }
+        }
+        show(`Could not delete user: ${detail}`);
+        return;
+      }
+      if (data?.deleted !== true || data.userId !== user.id.toLowerCase()) {
+        show('Deletion was not confirmed. Refresh and check the account before retrying.');
+        return;
+      }
+      users = users.filter((entry) => entry.id !== user.id);
+      renderUsers();
+      await loadUsersFromSupabase();
+      recordAudit('Users', 'Deleted', `User ${user.username} (${user.id}) was deleted.`);
+      save();
+      show(`User ${user.username} deleted successfully.`, true);
+    } catch (error) {
+      console.error('Unexpected user deletion error:', error);
+      show('Unable to confirm the result. Refresh the user list before retrying.');
+    } finally {
+      remove.disabled = false;
+    }
     return;
   }
 });
